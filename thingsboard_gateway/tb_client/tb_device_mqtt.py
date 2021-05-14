@@ -21,11 +21,12 @@ from threading import Thread
 
 import paho.mqtt.client as paho
 
-from ujson import dumps, loads
+from simplejson import dumps, loads
 
-from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 from google.protobuf import json_format
+from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 from thingsboard_gateway.tb_client.proto.transport_pb2 import *
+from thingsboard_gateway.tb_client.constants import MqttScheme
 
 PAYLOAD_TYPE_TOPIC = "/payload"
 RPC_RESPONSE_TOPIC = 'v1/devices/me/rpc/response/'
@@ -113,6 +114,8 @@ class TBDeviceMqttClient:
         self._client.on_publish = self._on_publish
         self._client.on_message = self._on_message
         self._client.on_disconnect = self._on_disconnect
+        self.payload_type = MqttScheme.JSON_PAYLOAD
+        self.__change_try_sent = False
 
     # def _on_log(self, client, userdata, level, buf):
     #     if isinstance(buf, Exception):
@@ -131,6 +134,7 @@ class TBDeviceMqttClient:
         log.setLevel(prev_level)
 
     def change_payload_type(self, payload_type="PROTOBUF"):
+        self.__change_try_sent = True
         self._client.publish(PAYLOAD_TYPE_TOPIC, "{\"type\": \"%s\"}" % (payload_type.upper(), ), 1)
 
     def _on_connect(self, client, userdata, flags, result_code, *extra_params):
@@ -189,26 +193,30 @@ class TBDeviceMqttClient:
         self.stopped = True
 
     def _on_message(self, client, userdata, message):
-        # content = TBUtility.decode(message)
-        self._on_decoded_message(message)
+        decoded_message = TBUtility.decode(message)
+        content = decoded_message if self.payload_type == MqttScheme.JSON_PAYLOAD else None
+        self._on_decoded_message(content, message)
 
-    def _on_decoded_message(self, message):
+    def _on_decoded_message(self, content, message):
         if message.topic.startswith(RPC_REQUEST_TOPIC):
-            content = self._convert_response_payload_to_proto_object(message, ToDeviceRpcRequestMsg)
-            content = self._convert_to_json(content)
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, ToDeviceRpcRequestMsg)
+                content = self._convert_to_json(content)
             request_id = message.topic[len(RPC_REQUEST_TOPIC):len(message.topic)]
             if self.__device_on_server_side_rpc_response:
                 self.__device_on_server_side_rpc_response(request_id, content)
         elif message.topic.startswith(RPC_RESPONSE_TOPIC):
-            content = self._convert_response_payload_to_proto_object(message, ToDeviceRpcResponseMsg)
-            content = self._convert_to_json(content)
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, ToDeviceRpcResponseMsg)
+                content = self._convert_to_json(content)
             with self._lock:
                 request_id = int(message.topic[len(RPC_RESPONSE_TOPIC):len(message.topic)])
                 callback = self.__device_client_rpc_dict.pop(request_id)
             callback(request_id, content, None)
         elif message.topic == ATTRIBUTES_TOPIC:
-            content = self._convert_response_payload_to_proto_object(message, AttributeUpdateNotificationMsg)
-            content = self._convert_to_json(content)
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, AttributeUpdateNotificationMsg)
+                content = self._convert_to_json(content)
             dict_results = []
             with self._lock:
                 # callbacks for everything
@@ -229,8 +237,9 @@ class TBDeviceMqttClient:
             for res in dict_results:
                 res(content, None)
         elif message.topic.startswith(ATTRIBUTES_TOPIC_RESPONSE):
-            content = self._convert_response_payload_to_proto_object(message, GetAttributeResponseMsg)
-            content = self._convert_to_json(content)
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, GetAttributeResponseMsg)
+                content = self._convert_to_json(content)
             with self._lock:
                 req_id = int(message.topic[len(ATTRIBUTES_TOPIC+"/response/"):])
                 # pop callback and use it
@@ -259,10 +268,12 @@ class TBDeviceMqttClient:
         if quality_of_service not in (0, 1):
             log.error("Quality of service (qos) value must be 0 or 1")
             return None
-        proto_msg = ToServerRpcResponseMsg()
-        proto_msg.requestId = req_id
-        proto_msg.payload = resp
-        info = self._client.publish(RPC_RESPONSE_TOPIC + str(req_id), proto_msg.SerializeToString(), qos=quality_of_service)
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = ToServerRpcResponseMsg()
+            proto_msg.requestId = req_id
+            proto_msg.payload = resp
+            resp = proto_msg.SerializeToString()
+        info = self._client.publish(RPC_RESPONSE_TOPIC + str(req_id), resp, qos=quality_of_service)
         if wait_for_publish:
             info.wait_for_publish()
 
@@ -293,8 +304,9 @@ class TBDeviceMqttClient:
         quality_of_service = quality_of_service if quality_of_service is not None else self.quality_of_service
         if not isinstance(telemetry, list) and not (isinstance(telemetry, dict) and telemetry.get("ts") is not None):
             telemetry = [telemetry]
-        proto_msg = self._convert_telemetry_to_proto(telemetry)
-        return self.publish_data(proto_msg.SerializeToString(), TELEMETRY_TOPIC, quality_of_service)
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            telemetry = self._convert_telemetry_to_proto(telemetry).SerializeToString()
+        return self.publish_data(telemetry, TELEMETRY_TOPIC, quality_of_service)
 
     def send_attributes(self, attributes, quality_of_service=None):
         quality_of_service = quality_of_service if quality_of_service is not None else self.quality_of_service
@@ -324,20 +336,39 @@ class TBDeviceMqttClient:
             return self.__device_max_sub_id
 
     def request_attributes(self, client_keys=None, shared_keys=None, callback=None):
-        proto_msg = GetAttributeRequestMsg()
+        msg = GetAttributeRequestMsg() if self.payload_type == MqttScheme.PROTO_PAYLOAD else {}
         if client_keys:
-            proto_msg.clientAttributeNames.extend(client_keys)
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                msg.clientAttributeNames.extend(client_keys)
+            else:
+                tmp = ""
+                for key in client_keys:
+                    tmp += key + ","
+                tmp = tmp[:len(tmp) - 1]
+                msg.update({"clientKeys": tmp})
         if shared_keys:
-            proto_msg.sharedAttributeNames.extend(shared_keys)
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                msg.sharedAttributeNames.extend(shared_keys)
+            else:
+                tmp = ""
+                for key in shared_keys:
+                    tmp += key + ","
+                tmp = tmp[:len(tmp) - 1]
+                msg.update({"sharedKeys": tmp})
+
+        attr_request_number =  self._add_attr_request_callback(callback)
+
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            msg.requestId = attr_request_number
+            msg = msg.SerializeToString()
+        else:
+            msg = dumps(msg)
 
         ts_in_millis = int(round(time.time() * 1000))
-
-        proto_msg.requestId = self._add_attr_request_callback(callback)
-
         info = self._client.publish(topic=ATTRIBUTES_TOPIC_REQUEST + str(self.__attr_request_number),
-                                    payload=proto_msg.SerializeToString(),
+                                    payload=msg,
                                     qos=self.quality_of_service)
-        self._add_timeout(proto_msg.requestId, ts_in_millis + 30000)
+        self._add_timeout(attr_request_number, ts_in_millis + 30000)
         return info
 
     def _add_timeout(self, attr_request_number, timestamp):

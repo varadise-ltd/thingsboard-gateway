@@ -141,8 +141,6 @@ class TBGatewayService:
                                    name="Send data to Thingsboard Thread")
         self._send_thread.start()
         log.info("Gateway started.")
-
-        self.tb_client.client.change_payload_type()
         try:
             gateway_statistic_send = 0
             connectors_configuration_check_time = 0
@@ -157,8 +155,7 @@ class TBGatewayService:
                 if self.tb_client.is_connected() and not self.__subscribed_to_rpc_topics:
                     processing = True
                     for device in self.__saved_devices:
-                        self.add_device(device, {"connector": self.__saved_devices[device]["connector"]}, True,
-                                        device_type=self.__saved_devices[device]["device_type"])
+                        self.add_device(device, {"connector": self.__saved_devices[device]["connector"]}, device_type=self.__saved_devices[device]["device_type"])
                     self.subscribe_to_required_topics()
                     self.__subscribed_to_rpc_topics = True
 
@@ -417,7 +414,6 @@ class TBGatewayService:
         while True:
             try:
                 if self.tb_client.is_connected():
-                    size = getsizeof(devices_data_in_event_pack)
                     events = []
                     if self.__remote_configurator is None or not self.__remote_configurator.in_process and self.tb_client.client._client:
                         events = self._event_storage.get_event_pack()

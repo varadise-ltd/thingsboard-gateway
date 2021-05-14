@@ -15,35 +15,13 @@
 import logging
 import time
 
-from ujson import dumps
+from simplejson import dumps
 
 from google.protobuf import json_format
+from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 from thingsboard_gateway.tb_client.proto.transport_pb2 import *
 from thingsboard_gateway.tb_client.tb_device_mqtt import TBDeviceMqttClient
-from thingsboard_gateway.tb_utility.tb_utility import TBUtility
-
-PROTO_REQUEST = "/req"
-PROTO_RESPONSE = "/rsp"
-PROTO_RPC = "/rpc"
-PROTO_CONNECT = "/con"
-PROTO_DISCONNECT = "/dis"
-PROTO_TELEMETRY = "/tel"
-PROTO_ATTRIBUTES = "/atr"
-PROTO_CLAIM = "/clm"
-PROTO_ACTION = "/act"
-PROTO_ATTRIBUTES_RESPONSE = PROTO_ATTRIBUTES + PROTO_RESPONSE
-PROTO_ATTRIBUTES_REQUEST = PROTO_ATTRIBUTES + PROTO_REQUEST
-GATEWAY_MAIN_TOPIC = "v2/g"
-GATEWAY_CONNECT_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_CONNECT
-GATEWAY_DISCONNECT_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_DISCONNECT
-GATEWAY_ATTRIBUTES_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_ATTRIBUTES
-GATEWAY_TELEMETRY_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_TELEMETRY
-# TODO Add Claim device processing
-# GATEWAY_CLAIM_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_CLAIM
-GATEWAY_RPC_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_RPC
-GATEWAY_DEVICE_ACTION_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_ACTION
-GATEWAY_ATTRIBUTES_REQUEST_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_ATTRIBUTES_REQUEST
-GATEWAY_ATTRIBUTES_RESPONSE_TOPIC = GATEWAY_MAIN_TOPIC + PROTO_ATTRIBUTES_RESPONSE
+from thingsboard_gateway.tb_client.constants import MqttTopics, MqttScheme
 
 log = logging.getLogger("tb_connection")
 
@@ -67,16 +45,17 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
         self._client._on_unsubscribe = self._on_unsubscribe
         self._gw_subscriptions = {}
         self.gateway = gateway
+        self.__mqtt_topics = MqttTopics(MqttScheme.JSON_PAYLOAD)
 
     def _on_connect(self, client, userdata, flags, result_code, *extra_params):
         super()._on_connect(client, userdata, flags, result_code, *extra_params)
         if result_code == 0:
             self._gw_subscriptions[
-                int(self._client.subscribe(GATEWAY_ATTRIBUTES_TOPIC, qos=1)[1])] = GATEWAY_ATTRIBUTES_TOPIC
-            self._gw_subscriptions[int(self._client.subscribe(GATEWAY_ATTRIBUTES_RESPONSE_TOPIC, qos=1)[
-                                           1])] = GATEWAY_ATTRIBUTES_RESPONSE_TOPIC
-            self._gw_subscriptions[int(self._client.subscribe(GATEWAY_RPC_TOPIC, qos=1)[1])] = GATEWAY_RPC_TOPIC
-            # self._gw_subscriptions[int(self._client.subscribe(GATEWAY_RPC_RESPONSE_TOPIC)[1])] = GATEWAY_RPC_RESPONSE_TOPIC
+                int(self._client.subscribe(self.__mqtt_topics.GATEWAY_ATTRIBUTES_TOPIC, qos=1)[1])] = self.__mqtt_topics.GATEWAY_ATTRIBUTES_TOPIC
+            self._gw_subscriptions[int(self._client.subscribe(self.__mqtt_topics.GATEWAY_ATTRIBUTES_RESPONSE_TOPIC, qos=1)[
+                                           1])] = self.__mqtt_topics.GATEWAY_ATTRIBUTES_RESPONSE_TOPIC
+            self._gw_subscriptions[int(self._client.subscribe(self.__mqtt_topics.GATEWAY_RPC_TOPIC, qos=1)[1])] = self.__mqtt_topics.GATEWAY_RPC_TOPIC
+            # self._gw_subscriptions[int(self._client.subscribe(self.__mqtt_topics.GATEWAY_RPC_RESPONSE_TOPIC)[1])] = self.__mqtt_topics.GATEWAY_RPC_RESPONSE_TOPIC
 
     def _on_subscribe(self, client, userdata, mid, granted_qos):
         subscription = self._gw_subscriptions.get(mid)
@@ -95,22 +74,26 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
         return True if self._gw_subscriptions else False
 
     def _on_message(self, client, userdata, message):
-        super()._on_decoded_message(message)
-        self._on_decoded_message(message)
+        decoded_message = TBUtility.decode(message)
+        content = decoded_message if isinstance(decoded_message, dict) else None
+        super()._on_decoded_message(content, message)
+        self._on_decoded_message(content, message)
 
-    def _on_decoded_message(self, message):
-        if message.topic.startswith(GATEWAY_DEVICE_ACTION_TOPIC):
-            content = self._convert_response_payload_to_proto_object(message, GatewayActionMsg)
-            content = self._convert_to_json(content)
+    def _on_decoded_message(self, content, message):
+        if message.topic.startswith(self.__mqtt_topics.GATEWAY_DEVICE_ACTION_TOPIC):
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, GatewayActionMsg)
+                content = self._convert_to_json(content)
             if content["action"] == "DELETED":
                 device_name = content["device"]
                 self.__connected_devices.remove(device_name)
                 log.info("Device %s was removed on ThingsBoard!")
             if self.devices_actions_handler is not None:
                 self.devices_actions_handler(self, content)
-        if message.topic.startswith(GATEWAY_ATTRIBUTES_RESPONSE_TOPIC):
-            content = self._convert_response_payload_to_proto_object(message, GatewayAttributeResponseMsg)
-            content = self._convert_to_json(content)
+        elif message.topic.startswith(self.__mqtt_topics.GATEWAY_ATTRIBUTES_RESPONSE_TOPIC):
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, GatewayAttributeResponseMsg)
+                content = self._convert_to_json(content)
             with self._lock:
                 req_id = content["id"]
                 # pop callback and use it
@@ -118,9 +101,10 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
                     self._attr_request_dict.pop(req_id)(content, None)
                 else:
                     log.error("Unable to find callback to process attributes response from TB")
-        elif message.topic == GATEWAY_ATTRIBUTES_TOPIC:
-            content = self._convert_response_payload_to_proto_object(message, GatewayAttributeUpdateNotificationMsg)
-            content = self._convert_to_json(content)
+        elif message.topic == self.__mqtt_topics.GATEWAY_ATTRIBUTES_TOPIC:
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, GatewayAttributeUpdateNotificationMsg)
+                content = self._convert_to_json(content)
             with self._lock:
                 # callbacks for everything
                 if self.__sub_dict.get("*|*"):
@@ -137,9 +121,10 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
                     if self.__sub_dict.get(target):
                         for sub_id in self.__sub_dict[target]:
                             self.__sub_dict[target][sub_id](content)
-        elif message.topic == GATEWAY_RPC_TOPIC:
-            content = self._convert_response_payload_to_proto_object(message, GatewayRpcResponseMsg)
-            content = self._convert_to_json(content)
+        elif message.topic == self.__mqtt_topics.GATEWAY_RPC_TOPIC:
+            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+                content = self._convert_response_payload_to_proto_object(message, GatewayRpcResponseMsg)
+                content = self._convert_to_json(content)
             if self.devices_server_side_rpc_request_handler:
                 self.devices_server_side_rpc_request_handler(self, content)
 
@@ -149,12 +134,25 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
             return False
         ts_in_millis = int(round(time.time() * 1000))
         attr_request_number = self._add_attr_request_callback(callback)
-        proto_msg = GatewayAttributesRequestMsg()
-        proto_msg.deviceName = device
-        proto_msg.client = type_is_client
-        for key in keys:
-            proto_msg.key.append(key)
-        info = self._client.publish(GATEWAY_ATTRIBUTES_REQUEST_TOPIC, proto_msg.SerializeToString(), 1)
+        msg = {}
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = GatewayAttributesRequestMsg()
+            proto_msg.deviceName = device
+            proto_msg.client = type_is_client
+            for key in keys:
+                proto_msg.key.append(key)
+            msg = proto_msg.SerializeToString()
+        else:
+            keys_str = ""
+            for key in keys:
+                keys_str += key + ","
+            keys_str = keys_str[:len(keys_str) - 1]
+            msg = {"key": keys_str,
+                   "device": device,
+                   "client": type_is_client,
+                   "id": attr_request_number}
+            msg = dumps(msg)
+        info = self._client.publish(self.__mqtt_topics.GATEWAY_ATTRIBUTES_REQUEST_TOPIC, msg, 1)
         self._add_timeout(attr_request_number, ts_in_millis + 30000)
         return info
 
@@ -165,36 +163,49 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
         return self.__request_attributes(device_name, keys, callback, True)
 
     def gw_send_attributes(self, device, attributes, quality_of_service=1):
-        proto_msg = GatewayAttributesMsg()
-        attributes_msg = AttributesMsg()
-        attributes_msg.deviceName = device
-        self._convert_attributes_to_proto(attributes, attributes_msg.msg.kv)
-        proto_msg.msg.append(attributes_msg)
-        return self.publish_data(proto_msg.SerializeToString(), GATEWAY_ATTRIBUTES_TOPIC, quality_of_service)
+        msg = {device: attributes}
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = GatewayAttributesMsg()
+            attributes_msg = AttributesMsg()
+            attributes_msg.deviceName = device
+            self._convert_attributes_to_proto(attributes, attributes_msg.msg.kv)
+            proto_msg.msg.append(attributes_msg)
+            msg = proto_msg.SerializeToString()
+        return self.publish_data(msg, self.__mqtt_topics.GATEWAY_ATTRIBUTES_TOPIC, quality_of_service)
 
     def gw_send_telemetry(self, device, telemetry, quality_of_service=1):
         if not isinstance(telemetry, list) and not (isinstance(telemetry, dict) and telemetry.get("ts") is not None):
             telemetry = [telemetry]
-        proto_msg = GatewayTelemetryMsg()
-        proto_msg.msg.append(self.__convert_telemetry_to_proto(telemetry, device))
-        return self.publish_data(proto_msg.SerializeToString(), GATEWAY_TELEMETRY_TOPIC, quality_of_service)
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = GatewayTelemetryMsg()
+            proto_msg.msg.append(self.__convert_telemetry_to_proto(telemetry, device))
+            telemetry = proto_msg.SerializeToString()
+        return self.publish_data(telemetry, self.__mqtt_topics.GATEWAY_TELEMETRY_TOPIC, quality_of_service)
 
     def gw_connect_device(self, device_name, device_type):
-        proto_msg = ConnectMsg()
-        proto_msg.deviceName = device_name
-        proto_msg.deviceType = device_type
-        info = self._client.publish(topic=GATEWAY_CONNECT_TOPIC,
-                                    payload=proto_msg.SerializeToString(),
+        msg = dumps({"device": device_name,
+               "type": device_type
+               })
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = ConnectMsg()
+            proto_msg.deviceName = device_name
+            proto_msg.deviceType = device_type
+            msg = proto_msg.SerializeToString()
+        info = self._client.publish(topic=self.__mqtt_topics.GATEWAY_CONNECT_TOPIC,
+                                    payload=msg,
                                     qos=self.quality_of_service)
         self.__connected_devices.add(device_name)
         log.debug("Connected device %s", device_name)
         return info
 
     def gw_disconnect_device(self, device_name):
-        proto_msg = DisconnectMsg()
-        proto_msg.deviceName = device_name
-        info = self._client.publish(topic=GATEWAY_DISCONNECT_TOPIC,
-                                    payload=proto_msg.SerializeToString(),
+        msg = dumps({"device": device_name})
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = DisconnectMsg()
+            proto_msg.deviceName = device_name
+            msg = proto_msg.SerializeToString()
+        info = self._client.publish(topic=self.__mqtt_topics.GATEWAY_DISCONNECT_TOPIC,
+                                    payload=msg,
                                     qos=self.quality_of_service)
         self.__connected_devices.remove(device_name)
         log.debug("Disconnected device %s", device_name)
@@ -238,14 +249,18 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
         if quality_of_service not in (0, 1):
             log.error("Quality of service (qos) value must be 0 or 1")
             return None
-        proto_msg = GatewayRpcResponseMsg()
-        proto_msg.deviceName = device
-        proto_msg.id = req_id
-        proto_msg.data = resp
-        info = self._client.publish(GATEWAY_RPC_TOPIC,
-                                    proto_msg.SerializeToString(),
-                                    qos=quality_of_service)
+        msg = dumps({"device": device, "id": req_id, "data": resp})
+        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            proto_msg = GatewayRpcResponseMsg()
+            proto_msg.deviceName = device
+            proto_msg.id = req_id
+            proto_msg.data = resp
+            msg = proto_msg.SerializeToString()
+        info = self._client.publish(self.__mqtt_topics.GATEWAY_RPC_TOPIC, msg, qos=quality_of_service)
         return info
+
+    def update_topics(self):
+        self.__mqtt_topics = MqttTopics(self.payload_type)
 
     def __convert_telemetry_to_proto(self, telemetry, device):
         telemetry_msg = TelemetryMsg()
