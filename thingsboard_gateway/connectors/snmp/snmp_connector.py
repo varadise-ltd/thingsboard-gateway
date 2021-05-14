@@ -1,16 +1,16 @@
-#      Copyright 2020. ThingsBoard
-#  #
-#      Licensed under the Apache License, Version 2.0 (the "License");
-#      you may not use this file except in compliance with the License.
-#      You may obtain a copy of the License at
-#  #
-#          http://www.apache.org/licenses/LICENSE-2.0
-#  #
-#      Unless required by applicable law or agreed to in writing, software
-#      distributed under the License is distributed on an "AS IS" BASIS,
-#      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#      See the License for the specific language governing permissions and
-#      limitations under the License.
+#     Copyright 2021. ThingsBoard
+#
+#     Licensed under the Apache License, Version 2.0 (the "License");
+#     you may not use this file except in compliance with the License.
+#     You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
 
 from threading import Thread
 from time import sleep, time
@@ -20,6 +20,7 @@ from socket import gethostbyname
 from re import search
 
 from thingsboard_gateway.connectors.connector import Connector, log
+from thingsboard_gateway.tb_utility.tb_loader import TBModuleLoader
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 
 try:
@@ -228,8 +229,8 @@ class SNMPConnector(Connector, Thread):
     def __fill_converters(self):
         try:
             for device in self.__devices:
-                device["uplink_converter"] = TBUtility.check_and_import("snmp", device.get('converter', self._default_converters["uplink"]))(device)
-                device["downlink_converter"] = TBUtility.check_and_import("snmp", device.get('converter', self._default_converters["downlink"]))(device)
+                device["uplink_converter"] = TBModuleLoader.import_module("snmp", device.get('converter', self._default_converters["uplink"]))(device)
+                device["downlink_converter"] = TBModuleLoader.import_module("snmp", device.get('converter', self._default_converters["downlink"]))(device)
         except Exception as e:
             log.exception(e)
 

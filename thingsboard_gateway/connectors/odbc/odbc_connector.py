@@ -1,4 +1,4 @@
-#     Copyright 2020. ThingsBoard
+#     Copyright 2021. ThingsBoard
 #
 #     Licensed under the Apache License, Version 2.0 (the "License");
 #     you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ from string import ascii_lowercase
 from threading import Thread
 from ujson import dumps, load
 
+from thingsboard_gateway.tb_utility.tb_loader import TBModuleLoader
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 
 try:
@@ -72,7 +73,7 @@ class OdbcConnector(Connector, Thread):
         self.__timeseries_columns = []
 
         self.__converter = OdbcUplinkConverter() if not self.__config.get("converter", "") else \
-            TBUtility.check_and_import(self.__connector_type, self.__config["converter"])
+            TBModuleLoader.import_module(self.__connector_type, self.__config["converter"])
 
         self.__configure_pyodbc()
         self.__parse_rpc_config()
@@ -324,6 +325,7 @@ class OdbcConnector(Connector, Thread):
             file_name += self.__connection.getinfo(pyodbc.SQL_DRIVER_NAME)
             file_name += self.__connection.getinfo(pyodbc.SQL_SERVER_NAME)
             file_name += self.__connection.getinfo(pyodbc.SQL_DATABASE_NAME)
+            file_name += self.get_name()
             file_name += self.__config["polling"]["iterator"]["column"]
 
             self.__iterator_file_name = sha1(file_name.encode()).hexdigest() + ".json"

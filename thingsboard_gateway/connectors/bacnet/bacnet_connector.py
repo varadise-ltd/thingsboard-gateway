@@ -1,22 +1,23 @@
-#      Copyright 2020. ThingsBoard
-#  #
-#      Licensed under the Apache License, Version 2.0 (the "License");
-#      you may not use this file except in compliance with the License.
-#      You may obtain a copy of the License at
-#  #
-#          http://www.apache.org/licenses/LICENSE-2.0
-#  #
-#      Unless required by applicable law or agreed to in writing, software
-#      distributed under the License is distributed on an "AS IS" BASIS,
-#      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#      See the License for the specific language governing permissions and
-#      limitations under the License.
+#     Copyright 2021. ThingsBoard
+#
+#     Licensed under the Apache License, Version 2.0 (the "License");
+#     you may not use this file except in compliance with the License.
+#     You may obtain a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
 
 from random import choice
 from threading import Thread
 from time import time, sleep
 from string import ascii_lowercase
 
+from thingsboard_gateway.tb_utility.tb_loader import TBModuleLoader
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 
 try:
@@ -49,10 +50,11 @@ class BACnetConnector(Thread, Connector):
         self.__bacnet_core_thread.start()
         self.__stopped = False
         self.__config_devices = self.__config["devices"]
-        self.default_converters = {"uplink_converter": TBUtility.check_and_import(self.__connector_type, "BACnetUplinkConverter"),
-                                     "downlink_converter": TBUtility.check_and_import(self.__connector_type, "BACnetDownlinkConverter")}
+        self.default_converters = {"uplink_converter": TBModuleLoader.import_module(self.__connector_type, "BACnetUplinkConverter"),
+                                     "downlink_converter": TBModuleLoader.import_module(self.__connector_type, "BACnetDownlinkConverter")}
         self.__request_functions = {"writeProperty": self._application.do_write_property,
-                                    "readProperty": self._application.do_read_property}
+                                    "readProperty": self._application.do_read_property,
+                                    "risingEdge": self._application.do_binary_rising_edge}
         self.__available_object_resources = {}
         self.rpc_requests_in_progress = {}
         self.__connected = False
@@ -214,7 +216,7 @@ class BACnetConnector(Thread, Connector):
             for datatype_config in device.get(datatype, []):
                 try:
                     for converter_type in self.default_converters:
-                        converter_object = self.default_converters[converter_type] if datatype_config.get("class") is None else TBUtility.check_and_import(self.__connector_type, device.get("class"))
+                        converter_object = self.default_converters[converter_type] if datatype_config.get("class") is None else TBModuleLoader.import_module(self.__connector_type, device.get("class"))
                         datatype_config[converter_type] = converter_object(device)
                 except Exception as e:
                     log.exception(e)
@@ -222,31 +224,32 @@ class BACnetConnector(Thread, Connector):
     def add_device(self, data):
         if self.__devices_address_name.get(data["address"]) is None:
             for device in self.__config_devices:
-                try:
-                    config_address = Address(device["address"])
-                    device_name_tag = TBUtility.get_value(device["deviceName"], get_tag=True)
-                    device_name = device["deviceName"].replace("${" + device_name_tag + "}", data.pop("name"))
-                    device_information = {
-                        **data,
-                        **self.__get_requests_configs(device),
-                        "type": device["deviceType"],
-                        "config": device,
-                        "attributes": device.get("attributes", []),
-                        "telemetry": device.get("timeseries", []),
-                        "poll_period": device.get("pollPeriod", 5000),
-                        "deviceName": device_name,
-                    }
-                    if config_address == data["address"] or \
-                            (config_address, GlobalBroadcast) or \
-                            (isinstance(config_address, LocalBroadcast) and isinstance(device["address"], LocalStation)) or \
-                            (isinstance(config_address, (LocalStation, RemoteStation)) and isinstance(data["address"], (
-                            LocalStation, RemoteStation))):
-                        self.__devices_address_name[data["address"]] = device_information["deviceName"]
-                        self.__devices.append(device_information)
+                if device["address"] == data["address"]:
+                    try:
+                        config_address = Address(device["address"])
+                        device_name_tag = TBUtility.get_value(device["deviceName"], get_tag=True)
+                        device_name = device["deviceName"].replace("${" + device_name_tag + "}", data.pop("name"))
+                        device_information = {
+                            **data,
+                            **self.__get_requests_configs(device),
+                            "type": device["deviceType"],
+                            "config": device,
+                            "attributes": device.get("attributes", []),
+                            "telemetry": device.get("timeseries", []),
+                            "poll_period": device.get("pollPeriod", 5000),
+                            "deviceName": device_name,
+                        }
+                        if config_address == data["address"] or \
+                                (config_address, GlobalBroadcast) or \
+                                (isinstance(config_address, LocalBroadcast) and isinstance(device["address"], LocalStation)) or \
+                                (isinstance(config_address, (LocalStation, RemoteStation)) and isinstance(data["address"], (
+                                LocalStation, RemoteStation))):
+                            self.__devices_address_name[data["address"]] = device_information["deviceName"]
+                            self.__devices.append(device_information)
 
-                    log.debug(data["address"].addrType)
-                except Exception as e:
-                    log.exception(e)
+                        log.debug(data["address"].addrType)
+                    except Exception as e:
+                        log.exception(e)
 
     def __get_requests_configs(self, device):
         result = {"attribute_updates": [], "server_side_rpc": []}

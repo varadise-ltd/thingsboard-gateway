@@ -1,16 +1,16 @@
-#  Copyright 2020. ThingsBoard
+#     Copyright 2021. ThingsBoard
 #
-#  Licensed under the Apache License, Version 2.0 (the "License");
-#  you may not use this file except in compliance with the License.
-#  You may obtain a copy of the License at
+#     Licensed under the Apache License, Version 2.0 (the "License");
+#     you may not use this file except in compliance with the License.
+#     You may obtain a copy of the License at
 #
-#      http://www.apache.org/licenses/LICENSE-2.0
+#         http://www.apache.org/licenses/LICENSE-2.0
 #
-#  Unless required by applicable law or agreed to in writing, software
-#  distributed under the License is distributed on an "AS IS" BASIS,
-#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#  See the License for the specific language governing permissions and
-#  limitations under the License.
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
 
 from bacpypes.pdu import Address, GlobalBroadcast
 from bacpypes.object import get_datatype
@@ -102,6 +102,12 @@ class TBBACnetApplication(BIPSimpleApplication):
             iocb.add_callback(self.__general_cb)
         except Exception as error:
             log.exception("exception: %r", error)
+
+    def do_binary_rising_edge(self, device, callback=None):
+        device["propertyValue"] = 1
+        self.do_write_property(device)
+        device["propertyValue"] = 0
+        self.do_write_property(device)
 
     def check_or_add(self, device):
         device_address = device["address"] if isinstance(device["address"], Address) else Address(device["address"])

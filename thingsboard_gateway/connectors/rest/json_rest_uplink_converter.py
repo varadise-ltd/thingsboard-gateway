@@ -1,16 +1,16 @@
-#      Copyright 2020. ThingsBoard
+#     Copyright 2021. ThingsBoard
 #
-#      Licensed under the Apache License, Version 2.0 (the "License");
-#      you may not use this file except in compliance with the License.
-#      You may obtain a copy of the License at
+#     Licensed under the Apache License, Version 2.0 (the "License");
+#     you may not use this file except in compliance with the License.
+#     You may obtain a copy of the License at
 #
-#          http://www.apache.org/licenses/LICENSE-2.0
+#         http://www.apache.org/licenses/LICENSE-2.0
 #
-#      Unless required by applicable law or agreed to in writing, software
-#      distributed under the License is distributed on an "AS IS" BASIS,
-#      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#      See the License for the specific language governing permissions and
-#      limitations under the License.
+#     Unless required by applicable law or agreed to in writing, software
+#     distributed under the License is distributed on an "AS IS" BASIS,
+#     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#     See the License for the specific language governing permissions and
+#     limitations under the License.
 
 from time import time
 from ujson import dumps, loads
@@ -51,7 +51,7 @@ class JsonRESTUplinkConverter(RESTConverter):
                        and ("${" not in str(key) and "}" not in str(key)):
                         is_valid_key = isinstance(key, str) and "${" in datatype_config["key"] and "}" in datatype_config["key"]
                         is_valid_value = isinstance(value, str) and "${" in datatype_config["value"] and "}" in datatype_config["value"]
-                        full_key = datatype_config["key"].replace('${' + key_tag + '}', key) if is_valid_key else key
+                        full_key = datatype_config["key"].replace('${' + str(key_tag) + '}', str(key)) if is_valid_key else key
                         full_value = datatype_config["value"].replace('${' + value_tag + '}', value) if is_valid_value else value
                         if datatype == 'timeseries' and (data.get("ts") is not None or data.get("timestamp") is not None):
                             dict_result[datatypes[datatype]].append({"ts": data.get('ts', data.get('timestamp', int(time()))), 'values': {full_key: full_value}})

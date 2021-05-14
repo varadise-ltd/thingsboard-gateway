@@ -1,4 +1,4 @@
-#     Copyright 2020. ThingsBoard
+#     Copyright 2021. ThingsBoard
 #
 #     Licensed under the Apache License, Version 2.0 (the "License");
 #     you may not use this file except in compliance with the License.
@@ -20,10 +20,13 @@ from random import choice
 from threading import Thread
 from string import ascii_lowercase
 import regex
-from ujson import dumps
+from simplejson import dumps
+
+from thingsboard_gateway.tb_utility.tb_loader import TBModuleLoader
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility
+
 try:
-    from opcua import Client, ua
+    from opcua import Client, Node, ua
 except ImportError:
     print("OPC-UA library not found")
     TBUtility.install_package("opcua")
@@ -55,7 +58,7 @@ class OpcUaConnector(Thread, Connector):
         else:
             self.__opcua_url = self.__server_conf.get("url")
         self.client = Client(self.__opcua_url, timeout=self.__server_conf.get("timeoutInMillis", 4000)/1000)
-        if self.__server_conf["identity"].get("type") == "cert.PEM": 
+        if self.__server_conf["identity"].get("type") == "cert.PEM":
             try:
                 ca_cert = self.__server_conf["identity"].get("caCert")
                 private_key = self.__server_conf["identity"].get("privateKey")
@@ -190,7 +193,6 @@ class OpcUaConnector(Thread, Connector):
             self.__sub = None
             log.exception(e)
 
-
     def close(self):
         self.__stopped = True
         if self.__connected:
@@ -226,7 +228,11 @@ class OpcUaConnector(Thread, Connector):
                         if isinstance(arguments, list):
                             result = method["node"].call_method(method[rpc_method], *arguments)
                         elif arguments is not None:
-                            result = method["node"].call_method(method[rpc_method], arguments)
+                            try:
+                                result = method["node"].call_method(method[rpc_method], arguments)
+                            except ua.UaStatusCodeError as e:
+                                if "BadTypeMismatch" in str(e) and isinstance(arguments, int):
+                                    result = method["node"].call_method(method[rpc_method], float(arguments))
                         else:
                             result = method["node"].call_method(method[rpc_method])
 
@@ -282,6 +288,7 @@ class OpcUaConnector(Thread, Connector):
             log.exception(e)
 
     def __search_nodes_and_subscribe(self, device_info):
+        sub_nodes = []
         information_types = {"attributes": "attributes", "timeseries": "telemetry"}
         for information_type in information_types:
             for information in device_info["configuration"][information_type]:
@@ -310,7 +317,7 @@ class OpcUaConnector(Thread, Connector):
                             if device_info["configuration"].get('converter') is None:
                                 converter = OpcUaUplinkConverter(configuration)
                             else:
-                                converter = TBUtility.check_and_import(self._connector_type, configuration)
+                                converter = TBModuleLoader.import_module(self._connector_type, configuration)
                             device_info["uplink_converter"] = converter
                         else:
                             converter = device_info["uplink_converter"]
@@ -323,14 +330,18 @@ class OpcUaConnector(Thread, Connector):
                         self.statistics['MessagesReceived'] = self.statistics['MessagesReceived'] + 1
                         self.data_to_send.append(converted_data)
                         self.statistics['MessagesSent'] = self.statistics['MessagesSent'] + 1
-                        if not self.__server_conf.get("disableSubscriptions", False):
-                            if self.__sub is None:
-                                self.__sub = self.client.create_subscription(self.__server_conf.get("subCheckPeriodInMillis", 500), self.__sub_handler)
-                            self.__sub.subscribe_data_change(information_node)
-                        log.debug("Added subscription to node: %s", str(information_node))
                         log.debug("Data to ThingsBoard: %s", converted_data)
+                        if not self.__server_conf.get("disableSubscriptions", False):
+                            sub_nodes.append(information_node)
                     else:
                         log.error("Node for %s \"%s\" with path %s - NOT FOUND!", information_type, information_key, information_path)
+        if not self.__server_conf.get("disableSubscriptions", False):
+            if self.__sub is None:
+                self.__sub = self.client.create_subscription(self.__server_conf.get("subCheckPeriodInMillis", 500),
+                                                             self.__sub_handler)
+            if sub_nodes:
+                self.__sub.subscribe_data_change(sub_nodes)
+                log.debug("Added subscription to nodes: %s", str(sub_nodes))
 
     def __save_methods(self, device_info):
         try:
@@ -385,17 +396,28 @@ class OpcUaConnector(Thread, Connector):
                 name_expression = TBUtility.get_value(name_pattern_config, get_tag=True)
                 if "${" in name_pattern_config and "}" in name_pattern_config:
                     log.debug("Looking for device name")
-                    name_path = self._check_path(name_expression, device_node)
-                    device_name_node = []
-                    self.__search_node(device_node, name_path, result=device_name_node)
-                    device_name_node = device_name_node[0]
-                    if device_name_node is not None:
-                        device_name_from_node = device_name_node.get_value()
-                        full_device_name = name_pattern_config.replace("${" + name_expression + "}", str(device_name_from_node)).replace(
-                            name_expression, str(device_name_from_node))
+                    device_name_from_node=""
+                    if name_expression == "$DisplayName":
+                        device_name_from_node = device_node.get_display_name().Text
+                    elif name_expression == "$BrowseName":
+                        device_name_from_node = device_node.get_browse_name().Name
+                    elif name_expression == "$NodeId.Identifier":
+                        device_name_from_node = str(device_node.nodeid.Identifier)
                     else:
+                        name_path = self._check_path(name_expression, device_node)
+                        device_name_node = []
+                        self.__search_node(device_node, name_path, result=device_name_node)
+                        if len(device_name_node) == 0:
+                            log.warn("Device name node - not found, skipping device...")
+                            continue
+                        device_name_node = device_name_node[0]
+                        if device_name_node is not None:
+                            device_name_from_node = device_name_node.get_value()
+                    if device_name_from_node == "":
                         log.error("Device name node not found with expression: %s", name_expression)
                         return None
+                    full_device_name = name_pattern_config.replace("${" + name_expression + "}", str(device_name_from_node)).replace(
+                        name_expression, str(device_name_from_node))
                 else:
                     full_device_name = name_expression
                 result_device_dict["deviceName"] = full_device_name
@@ -427,6 +449,9 @@ class OpcUaConnector(Thread, Connector):
                 log.error("Device node not found with expression: %s", TBUtility.get_value(device["deviceNodePattern"], get_tag=True))
         return result
 
+    def get_node_path(self, node:Node):
+        return '\\.'.join(node.get_browse_name().Name for node in node.get_path(200000))
+
     def __search_node(self, current_node, fullpath, search_method=False, result=None):
         if result is None:
             result = []
@@ -443,18 +468,26 @@ class OpcUaConnector(Thread, Connector):
             else:
                 fullpath_pattern = regex.compile(fullpath)
                 full1 = fullpath.replace('\\\\.', '.')
+                #current_node_path = '\\.'.join(char.split(":")[1] for char in current_node.get_path(200000, True))
+                current_node_path = self.get_node_path(current_node)
+                # we are allways the parent
+                child_node_parent_class = current_node.get_node_class()
+                new_parent = current_node
                 for child_node in current_node.get_children():
                     new_node_class = child_node.get_node_class()
-                    #basis Description of node.get_parent() function, sometime child_node.get_parent() return None
-                    new_parent = child_node.get_parent()
-                    if (new_parent is None):
-                        child_node_parent_class = current_node.get_node_class()
-                    else:
-                        child_node_parent_class = child_node.get_parent().get_node_class() 
-                    current_node_path = '\\.'.join(char.split(":")[1] for char in current_node.get_path(200000, True))
-                    new_node_path = '\\\\.'.join(char.split(":")[1] for char in child_node.get_path(200000, True))
+                    # this will not change you can do it outside th loop
+                    # basis Description of node.get_parent() function, sometime child_node.get_parent() return None
+                    #new_parent = child_node.get_parent()
+                    #if (new_parent is None):
+                    #    child_node_parent_class = current_node.get_node_class()
+                    #else:
+                    #    child_node_parent_class = child_node.get_parent().get_node_class()
+                    #current_node_path = '\\.'.join(char.split(":")[1] for char in current_node.get_path(200000, True))
+                    #new_node_path = '\\\\.'.join(char.split(":")[1] for char in child_node.get_path(200000, True))
+                    new_node_path = self.get_node_path(child_node)
                     if child_node_parent_class == ua.NodeClass.View and new_parent is not None:
-                        parent_path = '\\.'.join(char.split(":")[1] for char in child_node.get_parent().get_path(200000, True))
+                        parent_path = self.get_node_path(new_parent)
+                        #parent_path = '\\.'.join(char.split(":")[1] for char in new_parent.get_path(200000, True))
                         fullpath = fullpath.replace(current_node_path, parent_path)
                     nnp1 = new_node_path.replace('\\\\.', '.')
                     nnp2 = new_node_path.replace('\\\\', '\\')
@@ -498,8 +531,8 @@ class OpcUaConnector(Thread, Connector):
         if regex.match(r"ns=\d*;[isgb]=.*", config_path, regex.IGNORECASE):
             return config_path
         if re.search(r"^root", config_path.lower()) is None:
-            node_path = '\\\\.'.join(
-                char.split(":")[1] for char in node.get_path(200000, True))
+            node_path = self.get_node_path(node)
+            #node_path = '\\\\.'.join(char.split(":")[1] for char in node.get_path(200000, True))
             if config_path[-3:] != '\\.':
                 information_path = node_path + '\\\\.' + config_path.replace('\\', '\\\\')
             else:
