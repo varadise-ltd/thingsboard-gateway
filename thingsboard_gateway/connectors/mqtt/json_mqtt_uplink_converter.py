@@ -15,7 +15,7 @@
 from re import search
 from time import time, sleep
 
-from ujson import dumps
+from simplejson import dumps
 
 from thingsboard_gateway.connectors.mqtt.mqtt_uplink_converter import MqttUplinkConverter, log
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility

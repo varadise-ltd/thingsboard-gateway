@@ -36,14 +36,14 @@ class TBModuleLoader:
         if path.exists(DEB_INSTALLATION_EXTENSION_PATH):
             log.debug("Debian installation extensions folder exists.")
             TBModuleLoader.PATHS.append(DEB_INSTALLATION_EXTENSION_PATH)
-        TBModuleLoader.PATHS.append(root_path + EXTENSIONS_FOLDER)
         TBModuleLoader.PATHS.append(root_path + CONNECTORS_FOLDER)
+        TBModuleLoader.PATHS.append(root_path + EXTENSIONS_FOLDER)
 
     @staticmethod
     def import_module(extension_type, module_name):
         if len(TBModuleLoader.PATHS) == 0:
             TBModuleLoader.find_paths()
-        buffered_module_name = extension_type + module_name
+        buffered_module_name = extension_type + path.sep + module_name
         if TBModuleLoader.LOADED_CONNECTORS.get(buffered_module_name) is not None:
             return TBModuleLoader.LOADED_CONNECTORS[buffered_module_name]
         try:
@@ -54,7 +54,6 @@ class TBModuleLoader:
                         if not file.startswith('__') and file.endswith('.py'):
                             try:
                                 module_spec = spec_from_file_location(module_name, current_extension_path + path.sep + file)
-                                log.debug(module_spec)
 
                                 if module_spec is None:
                                     continue
@@ -66,7 +65,8 @@ class TBModuleLoader:
                                         log.info("Import %s from %s.", module_name, current_extension_path)
                                         TBModuleLoader.LOADED_CONNECTORS[buffered_module_name] = extension_class[1]
                                         return extension_class[1]
-                            except ImportError:
+                            except ImportError as e:
+                                log.debug("Extension %s import failed with error: %r", module_name, e)
                                 continue
         except Exception as e:
             log.exception(e)

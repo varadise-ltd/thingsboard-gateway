@@ -16,8 +16,8 @@ from enum import Enum
 
 
 class MqttScheme(Enum):
-    PROTO_PAYLOAD = 1
-    JSON_PAYLOAD = 2
+    PROTOBUF = 1
+    JSON = 2
 
 
 class MqttPayloadTopics:
@@ -59,8 +59,8 @@ class MqttJsonPayloadTopics(MqttPayloadTopics):
 
 
 MqttPayloadTopics = {
-    MqttScheme.PROTO_PAYLOAD: MqttProtoPayloadTopics,
-    MqttScheme.JSON_PAYLOAD: MqttJsonPayloadTopics
+    MqttScheme.PROTOBUF: MqttProtoPayloadTopics,
+    MqttScheme.JSON: MqttJsonPayloadTopics
     }
 
 

@@ -16,17 +16,15 @@ import logging
 import queue
 import ssl
 import time
-from threading import RLock
-from threading import Thread
+from threading import RLock, Thread
 
 import paho.mqtt.client as paho
-
+from google.protobuf import json_format
 from simplejson import dumps, loads
 
-from google.protobuf import json_format
-from thingsboard_gateway.tb_utility.tb_utility import TBUtility
+from thingsboard_gateway.tb_client.constants import MqttScheme, MqttTopics
 from thingsboard_gateway.tb_client.proto.transport_pb2 import *
-from thingsboard_gateway.tb_client.constants import MqttScheme
+from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 
 PAYLOAD_TYPE_TOPIC = "/payload"
 RPC_RESPONSE_TOPIC = 'v1/devices/me/rpc/response/'
@@ -114,14 +112,15 @@ class TBDeviceMqttClient:
         self._client.on_publish = self._on_publish
         self._client.on_message = self._on_message
         self._client.on_disconnect = self._on_disconnect
-        self.payload_type = MqttScheme.JSON_PAYLOAD
-        self.__change_try_sent = False
+        self.payload_type = MqttScheme.PROTOBUF
+        self.payload_type_changed = False
+        self._mqtt_topics = MqttTopics(self.payload_type)
 
-    # def _on_log(self, client, userdata, level, buf):
-    #     if isinstance(buf, Exception):
-    #         log.exception(buf)
-    #     else:
-    #         log.debug("%s - %s - %s - %s", client, userdata, level, buf)
+    def _on_log(self, client, userdata, level, buf):
+        if isinstance(buf, Exception):
+            log.exception(buf)
+        else:
+            log.debug("%s - %s - %s - %s", client, userdata, level, buf)
 
     def _on_publish(self, client, userdata, result):
         # log.debug("Data published to ThingsBoard!")
@@ -133,9 +132,10 @@ class TBDeviceMqttClient:
         log.debug("Disconnected client: %s, user data: %s, result code: %s", str(client), str(userdata), str(result_code))
         log.setLevel(prev_level)
 
-    def change_payload_type(self, payload_type="PROTOBUF"):
-        self.__change_try_sent = True
-        self._client.publish(PAYLOAD_TYPE_TOPIC, "{\"type\": \"%s\"}" % (payload_type.upper(), ), 1)
+    def change_payload_type(self, payload_type:MqttScheme):
+        log.debug("Changing service payload type to %r...", payload_type.name)
+        self.payload_type_changed = True
+        self.payload_type = payload_type
 
     def _on_connect(self, client, userdata, flags, result_code, *extra_params):
         result_codes = {
@@ -151,7 +151,6 @@ class TBDeviceMqttClient:
         if result_code == 0:
             self.__is_connected = True
             log.info("connection SUCCESS")
-            self.change_payload_type()
             self._client.subscribe(ATTRIBUTES_TOPIC, qos=self.quality_of_service)
             self._client.subscribe(ATTRIBUTES_TOPIC + "/response/+", qos=self.quality_of_service)
             self._client.subscribe(RPC_REQUEST_TOPIC + '+', qos=self.quality_of_service)
@@ -194,19 +193,19 @@ class TBDeviceMqttClient:
 
     def _on_message(self, client, userdata, message):
         decoded_message = TBUtility.decode(message)
-        content = decoded_message if self.payload_type == MqttScheme.JSON_PAYLOAD else None
+        content = decoded_message if self.payload_type == MqttScheme.JSON else None
         self._on_decoded_message(content, message)
 
     def _on_decoded_message(self, content, message):
         if message.topic.startswith(RPC_REQUEST_TOPIC):
-            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            if self.payload_type == MqttScheme.PROTOBUF:
                 content = self._convert_response_payload_to_proto_object(message, ToDeviceRpcRequestMsg)
                 content = self._convert_to_json(content)
             request_id = message.topic[len(RPC_REQUEST_TOPIC):len(message.topic)]
             if self.__device_on_server_side_rpc_response:
                 self.__device_on_server_side_rpc_response(request_id, content)
         elif message.topic.startswith(RPC_RESPONSE_TOPIC):
-            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            if self.payload_type == MqttScheme.PROTOBUF:
                 content = self._convert_response_payload_to_proto_object(message, ToDeviceRpcResponseMsg)
                 content = self._convert_to_json(content)
             with self._lock:
@@ -214,7 +213,7 @@ class TBDeviceMqttClient:
                 callback = self.__device_client_rpc_dict.pop(request_id)
             callback(request_id, content, None)
         elif message.topic == ATTRIBUTES_TOPIC:
-            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            if self.payload_type == MqttScheme.PROTOBUF:
                 content = self._convert_response_payload_to_proto_object(message, AttributeUpdateNotificationMsg)
                 content = self._convert_to_json(content)
             dict_results = []
@@ -237,7 +236,7 @@ class TBDeviceMqttClient:
             for res in dict_results:
                 res(content, None)
         elif message.topic.startswith(ATTRIBUTES_TOPIC_RESPONSE):
-            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            if self.payload_type == MqttScheme.PROTOBUF:
                 content = self._convert_response_payload_to_proto_object(message, GetAttributeResponseMsg)
                 content = self._convert_to_json(content)
             with self._lock:
@@ -268,7 +267,7 @@ class TBDeviceMqttClient:
         if quality_of_service not in (0, 1):
             log.error("Quality of service (qos) value must be 0 or 1")
             return None
-        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+        if self.payload_type == MqttScheme.PROTOBUF:
             proto_msg = ToServerRpcResponseMsg()
             proto_msg.requestId = req_id
             proto_msg.payload = resp
@@ -304,7 +303,7 @@ class TBDeviceMqttClient:
         quality_of_service = quality_of_service if quality_of_service is not None else self.quality_of_service
         if not isinstance(telemetry, list) and not (isinstance(telemetry, dict) and telemetry.get("ts") is not None):
             telemetry = [telemetry]
-        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+        if self.payload_type == MqttScheme.PROTOBUF:
             telemetry = self._convert_telemetry_to_proto(telemetry).SerializeToString()
         return self.publish_data(telemetry, TELEMETRY_TOPIC, quality_of_service)
 
@@ -336,9 +335,9 @@ class TBDeviceMqttClient:
             return self.__device_max_sub_id
 
     def request_attributes(self, client_keys=None, shared_keys=None, callback=None):
-        msg = GetAttributeRequestMsg() if self.payload_type == MqttScheme.PROTO_PAYLOAD else {}
+        msg = GetAttributeRequestMsg() if self.payload_type == MqttScheme.PROTOBUF else {}
         if client_keys:
-            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            if self.payload_type == MqttScheme.PROTOBUF:
                 msg.clientAttributeNames.extend(client_keys)
             else:
                 tmp = ""
@@ -347,7 +346,7 @@ class TBDeviceMqttClient:
                 tmp = tmp[:len(tmp) - 1]
                 msg.update({"clientKeys": tmp})
         if shared_keys:
-            if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+            if self.payload_type == MqttScheme.PROTOBUF:
                 msg.sharedAttributeNames.extend(shared_keys)
             else:
                 tmp = ""
@@ -358,7 +357,7 @@ class TBDeviceMqttClient:
 
         attr_request_number =  self._add_attr_request_callback(callback)
 
-        if self.payload_type == MqttScheme.PROTO_PAYLOAD:
+        if self.payload_type == MqttScheme.PROTOBUF:
             msg.requestId = attr_request_number
             msg = msg.SerializeToString()
         else:

@@ -14,7 +14,7 @@
 
 import struct
 
-from ujson import dumps
+from simplejson import dumps
 
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 from thingsboard_gateway.connectors.request.request_converter import RequestConverter, log

@@ -17,7 +17,7 @@ from os import remove, listdir
 from os.path import exists
 from time import sleep
 from base64 import b64decode
-from ujson import load, dumps
+from simplejson import load, dumps
 from json import JSONDecodeError
 from thingsboard_gateway.storage.file_event_storage import log
 from thingsboard_gateway.storage.event_storage_files import EventStorageFiles

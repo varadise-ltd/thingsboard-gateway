@@ -14,8 +14,7 @@
 
 from re import search
 from logging import getLogger
-from ujson import dumps, loads
-from json import JSONDecodeError
+from simplejson import dumps, loads, JSONDecodeError
 from jsonpath_rw import parse
 
 log = getLogger("service")

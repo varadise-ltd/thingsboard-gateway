@@ -19,7 +19,7 @@ from random import choice
 from time import time
 from re import fullmatch
 from queue import Queue
-from ujson import loads, JSONDecodeError
+from simplejson import loads, JSONDecodeError
 
 from thingsboard_gateway.tb_utility.tb_loader import TBModuleLoader
 from thingsboard_gateway.tb_utility.tb_utility import TBUtility

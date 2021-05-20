@@ -12,12 +12,12 @@
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
 
-from ujson import dumps
+from simplejson import dumps
 from thingsboard_gateway.connectors.mqtt.mqtt_uplink_converter import MqttUplinkConverter, log
 
 
 class CustomMqttUplinkConverter(MqttUplinkConverter):
-    def __init__(self, config):
+    def __init__(self, config, connector_convert_callback=None):
         self.__config = config.get('converter')
         self.dict_result = {}
 
