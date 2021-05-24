@@ -48,6 +48,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
 
     def _on_connect(self, client, userdata, flags, result_code, *extra_params):
         self.__connect_args = (client, userdata, flags, result_code, *extra_params)
+        self._client.publish(MqttTopics.PAYLOAD, dumps({"type": MqttScheme.PROTOBUF}))
         super()._on_connect(client, userdata, flags, result_code, *extra_params)
         if result_code == 0:
             self._gw_subscriptions[

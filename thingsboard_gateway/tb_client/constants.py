@@ -31,7 +31,6 @@ class MqttPayloadTopics:
     CLAIM = ""
     ACTION = ""
 
-
 class MqttProtoPayloadTopics(MqttPayloadTopics):
     REQUEST = "/req"
     RESPONSE = "/rsp"
@@ -65,6 +64,7 @@ MqttPayloadTopics = {
 
 
 class MqttTopics:
+    PAYLOAD = "/payload"
     ATTRIBUTES_RESPONSE = ""
     ATTRIBUTES_REQUEST = ""
     GATEWAY_CONNECT_TOPIC = ""
