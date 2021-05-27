@@ -49,7 +49,7 @@ DEFAULT_CONNECTORS = {
     "mqtt": "MqttConnector",
     "modbus": "ModbusConnector",
     "opcua": "OpcUaConnector",
-    "ble": "BLEConnector",
+    "ble": "NewBLEConnector",
     "request": "RequestConnector",
     "can": "CanConnector",
     "bacnet": "BACnetConnector",

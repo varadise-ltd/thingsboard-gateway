@@ -48,7 +48,8 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
 
     def _on_connect(self, client, userdata, flags, result_code, *extra_params):
         self.__connect_args = (client, userdata, flags, result_code, *extra_params)
-        self._client.publish(MqttTopics.PAYLOAD, dumps({"type": MqttScheme.PROTOBUF}))
+        if not self.payload_type_changed:
+            self._client.publish(MqttTopics.PAYLOAD, dumps({"type": MqttScheme.PROTOBUF.name}))
         super()._on_connect(client, userdata, flags, result_code, *extra_params)
         if result_code == 0:
             self._gw_subscriptions[
@@ -64,6 +65,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
             if granted_qos[0] == 128:
                 log.error("Service subscription to topic %s - failed.", subscription)
                 del self._gw_subscriptions[mid]
+                self.service_subscriptions_successful = False
                 if self.payload_type == MqttScheme.PROTOBUF and not self.payload_type_changed:
                     self.change_payload_type(MqttScheme.JSON)
                     self._on_connect(*self.__connect_args)
@@ -85,7 +87,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
 
     def _on_decoded_message(self, content, message):
         if message.topic.startswith(self._mqtt_topics.GATEWAY_DEVICE_ACTION_TOPIC):
-            if self.payload_type == MqttScheme.PROTOBUF:
+            if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
                 content = self._convert_response_payload_to_proto_object(message, GatewayActionMsg)
                 content = self._convert_to_json(content)
             if content["action"] == "DELETED":
@@ -95,7 +97,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
             if self.devices_actions_handler is not None:
                 self.devices_actions_handler(self, content)
         elif message.topic.startswith(self._mqtt_topics.GATEWAY_ATTRIBUTES_RESPONSE_TOPIC):
-            if self.payload_type == MqttScheme.PROTOBUF:
+            if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
                 content = self._convert_response_payload_to_proto_object(message, GatewayAttributeResponseMsg)
                 content = self._convert_to_json(content)
             with self._lock:
@@ -106,7 +108,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
                 else:
                     log.error("Unable to find callback to process attributes response from TB")
         elif message.topic == self._mqtt_topics.GATEWAY_ATTRIBUTES_TOPIC:
-            if self.payload_type == MqttScheme.PROTOBUF:
+            if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
                 content = self._convert_response_payload_to_proto_object(message, GatewayAttributeUpdateNotificationMsg)
                 content = self._convert_to_json(content)
             with self._lock:
@@ -126,7 +128,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
                         for sub_id in self.__sub_dict[target]:
                             self.__sub_dict[target][sub_id](content)
         elif message.topic == self._mqtt_topics.GATEWAY_RPC_TOPIC:
-            if self.payload_type == MqttScheme.PROTOBUF:
+            if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
                 content = self._convert_response_payload_to_proto_object(message, GatewayRpcResponseMsg)
                 content = self._convert_to_json(content)
             if self.devices_server_side_rpc_request_handler:
@@ -139,7 +141,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
         ts_in_millis = int(round(time.time() * 1000))
         attr_request_number = self._add_attr_request_callback(callback)
         msg = {}
-        if self.payload_type == MqttScheme.PROTOBUF:
+        if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
             proto_msg = GatewayAttributesRequestMsg()
             proto_msg.deviceName = device
             proto_msg.client = type_is_client
@@ -168,7 +170,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
 
     def gw_send_attributes(self, device, attributes, quality_of_service=1):
         msg = {device: attributes}
-        if self.payload_type == MqttScheme.PROTOBUF:
+        if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
             proto_msg = GatewayAttributesMsg()
             attributes_msg = AttributesMsg()
             attributes_msg.deviceName = device
@@ -180,7 +182,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
     def gw_send_telemetry(self, device, telemetry, quality_of_service=1):
         if not isinstance(telemetry, list) and not (isinstance(telemetry, dict) and telemetry.get("ts") is not None):
             telemetry = [telemetry]
-        if self.payload_type == MqttScheme.PROTOBUF:
+        if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
             proto_msg = GatewayTelemetryMsg()
             proto_msg.msg.append(self.__convert_telemetry_to_proto(telemetry, device))
             telemetry = proto_msg.SerializeToString()
@@ -192,7 +194,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
         msg = dumps({"device": device_name,
                "type": device_type
                })
-        if self.payload_type == MqttScheme.PROTOBUF:
+        if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
             proto_msg = ConnectMsg()
             proto_msg.deviceName = device_name
             proto_msg.deviceType = device_type
@@ -206,7 +208,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
 
     def gw_disconnect_device(self, device_name):
         msg = dumps({"device": device_name})
-        if self.payload_type == MqttScheme.PROTOBUF:
+        if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
             proto_msg = DisconnectMsg()
             proto_msg.deviceName = device_name
             msg = proto_msg.SerializeToString()
@@ -256,7 +258,7 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
             log.error("Quality of service (qos) value must be 0 or 1")
             return None
         msg = dumps({"device": device, "id": req_id, "data": resp})
-        if self.payload_type == MqttScheme.PROTOBUF:
+        if self.payload_type == MqttScheme.PROTOBUF and self.service_subscriptions_successful:
             proto_msg = GatewayRpcResponseMsg()
             proto_msg.deviceName = device
             proto_msg.id = req_id
