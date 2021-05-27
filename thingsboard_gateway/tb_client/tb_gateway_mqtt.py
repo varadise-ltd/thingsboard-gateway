@@ -72,6 +72,8 @@ class TBGatewayMqttClient(TBDeviceMqttClient):
             else:
                 log.debug("Service subscription to topic %s - successfully completed.", subscription)
                 del self._gw_subscriptions[mid]
+                if not self._gw_subscriptions:
+                    self.service_subscriptions_successful = True
 
     def _on_unsubscribe(self, *args):
         log.debug(args)

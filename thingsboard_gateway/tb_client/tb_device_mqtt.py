@@ -115,7 +115,7 @@ class TBDeviceMqttClient:
         self.payload_type = MqttScheme.PROTOBUF
         self.payload_type_changed = False
         self._mqtt_topics = MqttTopics(self.payload_type)
-        self.service_subscriptions_successful = True
+        self.service_subscriptions_successful = False
 
     def _on_log(self, client, userdata, level, buf):
         if isinstance(buf, Exception):
