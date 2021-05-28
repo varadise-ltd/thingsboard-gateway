@@ -40,6 +40,8 @@ class BytesBLEUplinkConverter(BLEUplinkConverter):
 
     def convert(self, config, data):
         try:
+            self.dict_result['deviceName'] = config.get('deviceName', self.dict_result['deviceName'])
+            self.dict_result['deviceType'] = config.get('deviceType', self.dict_result['deviceType'])
             if config.get('clean', True):
                 self.dict_result["telemetry"] = []
                 self.dict_result["attributes"] = []
