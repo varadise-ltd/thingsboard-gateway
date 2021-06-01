@@ -15,13 +15,18 @@
 import logging
 import time
 
-from google.protobuf import json_format
+from thingsboard_gateway.tb_utility.tb_utility import TBUtility
+
+try:
+    from google.protobuf import json_format
+except ImportError:
+    TBUtility.install_package('protobuf')
+    from google.protobuf import json_format
 from simplejson import dumps
 
 from thingsboard_gateway.tb_client.constants import MqttScheme, MqttTopics
 from thingsboard_gateway.tb_client.proto.transport_pb2 import *
 from thingsboard_gateway.tb_client.tb_device_mqtt import TBDeviceMqttClient
-from thingsboard_gateway.tb_utility.tb_utility import TBUtility
 
 log = logging.getLogger("tb_connection")
 
