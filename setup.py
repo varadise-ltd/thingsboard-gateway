@@ -53,7 +53,7 @@ setup(
         'pip',
         'paho-mqtt',
         'PyYAML',
-        'ujson',
+        'simplejson',
         'requests',
         'protobuf'
     ],
