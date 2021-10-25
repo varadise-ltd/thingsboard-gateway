@@ -9,6 +9,8 @@ thingsboard:
   security:
     accessToken: PUT_YOUR_GW_ACCESS_TOKEN_HERE
   qos: 1
+service:
+  mode: microservice
 storage:
   type: memory
   read_records_count: 100
@@ -21,14 +23,14 @@ storage:
 #  type: sqlite
 #  data_file_path: ./data/data.db
 connectors:
-  - name: MQTT Broker Connector
-    type: mqtt
-    configuration: mqtt.json
+#  - name: MQTT Broker Connector
+#    type: mqtt
+#    configuration: mqtt.json
 
-#  -
-#    name: Modbus Connector
-#    type: modbus
-#    configuration: modbus.json
+  -
+    name: Modbus Connector
+    type: modbus
+    configuration: modbus.json
 #
 #  -
 #    name: Modbus Connector

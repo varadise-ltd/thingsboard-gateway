@@ -139,7 +139,7 @@ class RemoteConfigurator:
                         self.__gateway.connectors_configs[connector['type']].append(
                             {"name": connector["name"], "config": {connector['configuration']: input_connector["config"]}})
                         connector_class = TBModuleLoader.import_module(connector["type"],
-                                                                       self.__gateway._default_connectors.get(connector["type"], connector.get("class")))
+                                                                       self.__gateway.DEFAULT_CONNECTORS.get(connector["type"], connector.get("class")))
                         self.__gateway._implemented_connectors[connector["type"]] = connector_class
         except Exception as e:
             LOG.exception(e)
@@ -209,7 +209,7 @@ class RemoteConfigurator:
                 return False
             else:
                 self.__old_tb_client.stop()
-                self.__gateway.subscribe_to_required_topics()
+                self.__gateway.subscribe_to_service_topics()
                 return True
         except Exception as e:
             LOG.exception(e)
@@ -235,7 +235,7 @@ class RemoteConfigurator:
             self.__gateway.tb_client.stop()
             self.__gateway.tb_client = TBClient(self.__old_general_configuration_file["thingsboard"])
             self.__gateway.tb_client.connect()
-            self.__gateway.subscribe_to_required_topics()
+            self.__gateway.subscribe_to_service_topics()
             LOG.debug("%s connection has been restored", str(self.__gateway.tb_client.client._client))
         except Exception as e:
             LOG.exception("Exception on reverting configuration occurred:")

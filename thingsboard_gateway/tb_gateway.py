@@ -14,17 +14,17 @@
 
 from os import curdir, listdir, mkdir, path
 
-from thingsboard_gateway.gateway.tb_gateway_service import TBGatewayService
+from thingsboard_gateway.gateway.tb_gateway_service_resolver import TBGatewayServiceResolver
 
 
 def main():
     if "logs" not in listdir(curdir):
         mkdir("logs")
-    TBGatewayService(path.dirname(path.abspath(__file__)) + '/config/tb_gateway.yaml'.replace('/', path.sep))
+    TBGatewayServiceResolver(path.dirname(path.abspath(__file__)) + '/config/tb_gateway.yaml'.replace('/', path.sep))
 
 
 def daemon():
-    TBGatewayService("/etc/thingsboard-gateway/config/tb_gateway.yaml".replace('/', path.sep))
+    TBGatewayServiceResolver("/etc/thingsboard-gateway/config/tb_gateway.yaml".replace('/', path.sep))
 
 
 if __name__ == '__main__':

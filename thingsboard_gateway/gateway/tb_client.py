@@ -129,7 +129,7 @@ class TBClient(threading.Thread):
                         pass
                     except Exception as e:
                         log.exception(e)
-                time.sleep(1)
+                time.sleep(.1)
         except Exception as e:
             log.exception(e)
             time.sleep(10)
