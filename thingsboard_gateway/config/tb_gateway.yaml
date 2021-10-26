@@ -11,6 +11,9 @@ thingsboard:
   qos: 1
 service:
   mode: microservice
+  grpc:
+    serverPort: 9595
+
 storage:
   type: memory
   read_records_count: 100

@@ -98,3 +98,11 @@ class TBGatewayServiceMonolith(TBGatewayService):
                 str(connector_camel_case + ' EventsSent').replace(' ', '')]
             summary_messages.update(**telemetry)
         return summary_messages
+
+    def _close_connectors(self):
+        for current_connector in self.available_connectors:
+            try:
+                self.available_connectors[current_connector].close()
+                log.debug("Connector %s closed connection.", current_connector)
+            except Exception as e:
+                log.exception(e)

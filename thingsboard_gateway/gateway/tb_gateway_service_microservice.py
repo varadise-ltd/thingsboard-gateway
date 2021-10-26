@@ -101,3 +101,12 @@ class TBGatewayServiceMicroservice(TBGatewayService):
         #     summary_messages.update(**telemetry)
         # return summary_messages
         pass
+
+    def _close_connectors(self):
+        # for current_connector in self.available_connectors:
+        #     try:
+        #         self.available_connectors[current_connector].close()
+        #         log.debug("Connector %s closed connection.", current_connector)
+        #     except Exception as e:
+        #         log.exception(e)
+        pass

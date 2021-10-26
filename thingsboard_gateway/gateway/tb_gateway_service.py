@@ -226,7 +226,7 @@ class TBGatewayService:
         except Exception as e:
             log.exception(e)
             self.__stop_gateway()
-            self.__close_connectors()
+            self._close_connectors()
             log.info("The gateway has been stopped.")
             self.tb_client.stop()
 
@@ -355,24 +355,15 @@ class TBGatewayService:
                 log.exception(e)
                 sleep(1)
 
-    def __close_connectors(self):
-        for current_connector in self.available_connectors:
-            try:
-                self.available_connectors[current_connector].close()
-                log.debug("Connector %s closed connection.", current_connector)
-            except Exception as e:
-                log.exception(e)
-
     def __stop_gateway(self):
         self.stopped = True
         self._updater.stop()
         log.info("Stopping...")
-        self.__close_connectors()
+        self._close_connectors()
         self._event_storage.stop()
         log.info("The gateway has been stopped.")
         self.tb_client.disconnect()
         self.tb_client.stop()
-
 
     def check_connector_configuration_updates(self):
         configuration_changed = False
@@ -384,7 +375,7 @@ class TBGatewayService:
             if configuration_changed:
                 break
         if configuration_changed:
-            self.__close_connectors()
+            self._close_connectors()
             self._load_connectors()
             self._connect_with_connectors()
 
