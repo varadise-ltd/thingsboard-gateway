@@ -342,7 +342,7 @@ class MqttConnector(Connector, Thread):
 
     def put_data_to_convert(self, converter, message, content) -> bool:
         if not self.__msg_queue.full():
-            self.__msg_queue.put((converter.convert, message.topic, content))
+            self.__msg_queue.put((converter.convert, message.topic, content), True, 100)
             return True
         return False
 
@@ -667,13 +667,16 @@ class MqttConnector(Connector, Thread):
 
                 request_topic = TBUtility.replace_params_tags(request_topic, content)
 
-                data_to_send_tag = '${' + TBUtility.get_value(rpc_config.get('valueExpression'), content['data'],
-                                                              'params',
-                                                              get_tag=True) + '}'
+                data_to_send_tags = TBUtility.get_values(rpc_config.get('valueExpression'), content['data'],
+                                                         'params',
+                                                         get_tag=True)
+                data_to_send_values = TBUtility.get_values(rpc_config.get('valueExpression'), content['data'],
+                                                           'params',
+                                                           expression_instead_none=True)
 
-                data_to_send_value = TBUtility.get_value(rpc_config.get('valueExpression'), content['data'], 'params',
-                                                         expression_instead_none=True)
-                data_to_send = rpc_config.get('valueExpression').replace(data_to_send_tag, str(data_to_send_value))
+                data_to_send = rpc_config.get('valueExpression')
+                for (tag, value) in zip(data_to_send_tags, data_to_send_values):
+                    data_to_send = data_to_send.replace('${' + tag + '}', str(value))
 
                 try:
                     self.__log.info("Publishing to: %s with data %s", request_topic, data_to_send)
@@ -710,7 +713,7 @@ class MqttConnector(Connector, Thread):
             while not self.stopped:
                 if not self.__msg_queue.empty():
                     self.in_progress = True
-                    convert_function, config, incoming_data = self.__msg_queue.get()
+                    convert_function, config, incoming_data = self.__msg_queue.get(True, 100)
                     converted_data = convert_function(config, incoming_data)
                     log.debug(converted_data)
                     self.__send_result(config, converted_data)
