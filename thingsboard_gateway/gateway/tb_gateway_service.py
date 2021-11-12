@@ -271,8 +271,6 @@ class TBGatewayService:
 
                     if events:
                         for event in events:
-                            log.debug("Reading events: %s" % str(events))
-
                             self.counter += 1
                             try:
                                 current_event = loads(event)
@@ -481,109 +479,6 @@ class TBGatewayService:
                                   connector_name)
             except Exception as e:
                 log.error(e)
-
-    def check_size(self, size, devices_data_in_event_pack):
-        if size >= self.__config["thingsboard"].get("maxPayloadSizeBytes", 4096):
-            self.__send_data(devices_data_in_event_pack)
-            size = 0
-        return size
-
-    def __read_data_from_storage(self):
-        devices_data_in_event_pack = {}
-        log.debug("Send data Thread has been started successfully.")
-
-        while not self.stopped:
-            try:
-                if self.tb_client.is_connected():
-                    size = getsizeof(str(devices_data_in_event_pack))-2
-                    events = []
-
-                    if self.__remote_configurator is None or not self.__remote_configurator.in_process:
-                        events = self._event_storage.get_event_pack()
-
-                    if events:
-                        for event in events:
-                            self.counter += 1
-                            try:
-                                current_event = loads(event)
-                            except Exception as e:
-                                log.exception(e)
-                                continue
-
-                            if not devices_data_in_event_pack.get(current_event["deviceName"]):
-                                devices_data_in_event_pack[current_event["deviceName"]] = {"telemetry": [],
-                                                                                           "attributes": {}}
-                            if current_event.get("telemetry"):
-                                if isinstance(current_event["telemetry"], list):
-                                    for item in current_event["telemetry"]:
-                                        size += getsizeof(str(item))-2
-                                        size = self.check_size(size, devices_data_in_event_pack)
-                                        devices_data_in_event_pack[current_event["deviceName"]]["telemetry"].append(
-                                            item)
-                                else:
-                                    size += getsizeof(str(current_event["telemetry"]))-2
-                                    size = self.check_size(size, devices_data_in_event_pack)
-                                    devices_data_in_event_pack[current_event["deviceName"]]["telemetry"].append(
-                                        current_event["telemetry"])
-                            if current_event.get("attributes"):
-                                if isinstance(current_event["attributes"], list):
-                                    for item in current_event["attributes"]:
-                                        size += getsizeof(str(item))-2
-                                        size = self.check_size(size, devices_data_in_event_pack)
-                                        devices_data_in_event_pack[current_event["deviceName"]]["attributes"].update(
-                                            item.items())
-                                else:
-                                    size += getsizeof(str(current_event["attributes"].items()))-2
-                                    size = self.check_size(size, devices_data_in_event_pack)
-                                    devices_data_in_event_pack[current_event["deviceName"]]["attributes"].update(
-                                        current_event["attributes"].items())
-
-                        if devices_data_in_event_pack:
-                            if not self.tb_client.is_connected():
-                                continue
-                            while self.__rpc_reply_sent:
-                                sleep(.01)
-
-                            self.__send_data(devices_data_in_event_pack)
-                            sleep(self.__min_pack_send_delay_ms)
-
-                        if self.tb_client.is_connected() and (
-                                self.__remote_configurator is None or not self.__remote_configurator.in_process):
-                            success = True
-                            while not self._published_events.empty():
-                                if (self.__remote_configurator is not None and self.__remote_configurator.in_process) or \
-                                        not self.tb_client.is_connected() or \
-                                        self._published_events.empty() or \
-                                        self.__rpc_reply_sent:
-                                    success = False
-                                    break
-                                event = self._published_events.get(False, 10)
-                                try:
-                                    if self.tb_client.is_connected() and (
-                                            self.__remote_configurator is None or not self.__remote_configurator.in_process):
-                                        if self.tb_client.client.quality_of_service == 1:
-                                            success = event.get() == event.TB_ERR_SUCCESS
-                                        else:
-                                            success = True
-                                    else:
-                                        break
-                                except Exception as e:
-                                    log.exception(e)
-                                    success = False
-                                sleep(.01)
-                            if success:
-                                self._event_storage.event_pack_processing_done()
-                                del devices_data_in_event_pack
-                                devices_data_in_event_pack = {}
-                        else:
-                            continue
-                    else:
-                        sleep(.01)
-                else:
-                    sleep(.1)
-            except Exception as e:
-                log.exception(e)
-                sleep(1)
 
     def __send_data(self, devices_data_in_event_pack):
         try:
