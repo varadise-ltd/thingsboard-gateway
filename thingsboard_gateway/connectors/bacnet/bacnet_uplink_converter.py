@@ -41,7 +41,7 @@ class BACnetUplinkConverter(BACnetConverter):
             dict_result[datatypes[config[0]]].append({config[1]["key"]: value})
         else:
             dict_result = value
-        self._log.debug("%r %r", self, dict_result)
+        self._log.info("%r %r", self, dict_result)
         return dict_result
 
     @staticmethod
