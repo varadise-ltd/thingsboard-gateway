@@ -8,7 +8,6 @@ def generate_devices() -> list[dict]:
     timeseries = []
     
     for idx, row in df.iterrows():
-        logger.success(row)
         point_name_parts = row["Object Name"].split('.')[-2:]
         point_name = ''.join(point_name_parts)
         object_id = row['Name'].replace('_', ':')
