@@ -37,9 +37,9 @@ class BytesModbusUplinkConverter(ModbusConverter):
         if _is_wordorder:
             try:
                 decoder = BinaryPayloadDecoder.fromCoils(coils, byteorder=endian_order,
-                                                         _wordorder=word_endian_order)
+                                                         wordorder=word_endian_order)
             except TypeError:
-                decoder = BinaryPayloadDecoder.fromCoils(coils, _wordorder=word_endian_order)
+                decoder = BinaryPayloadDecoder.fromCoils(coils, wordorder=word_endian_order)
         else:
             try:
                 decoder = BinaryPayloadDecoder.fromCoils(coils, byteorder=endian_order,
@@ -144,8 +144,8 @@ class BytesModbusUplinkConverter(ModbusConverter):
         decoded = None
 
         if lower_type in ['bit', 'bits']:
-            decoded_lastbyte = decoder_functions[type_]()
             decoded = decoder_functions[type_]()
+            decoded_lastbyte = decoder_functions[type_]()
             decoded += decoded_lastbyte
             decoded = decoded[len(decoded)-objects_count:]
 
@@ -179,7 +179,11 @@ class BytesModbusUplinkConverter(ModbusConverter):
         if isinstance(decoded, int):
             result_data = decoded
         elif isinstance(decoded, bytes) and lower_type == "string":
-            result_data = decoded.decode('UTF-8')
+            try:
+                result_data = decoded.decode('UTF-8')
+            except UnicodeDecodeError as e:
+                self._log.error("Error decoding string from bytes, will be saved as hex: %s", decoded, exc_info=e)
+                result_data = decoded.hex()
         elif isinstance(decoded, bytes) and lower_type == "bytes":
             result_data = decoded.hex()
         elif isinstance(decoded, list):

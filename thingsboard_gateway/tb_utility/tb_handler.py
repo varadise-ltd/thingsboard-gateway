@@ -13,8 +13,11 @@
 #     limitations under the License.
 
 import logging
+import os
 import threading
 import logging.handlers
+from os.path import exists, dirname
+from pathlib import Path
 from sys import stdout
 from time import time, sleep
 from os import environ
@@ -60,7 +63,7 @@ class TBLoggerHandler(logging.Handler):
         log.debug("Added remote handler to log %s", name)
 
     def _send_logs(self):
-        while self.activated:
+        while self.activated and not self.__gateway.stopped:
             if not self._logs_queue.empty():
                 logs_for_sending_list = []
 
@@ -105,8 +108,8 @@ class TBLoggerHandler(logging.Handler):
             log = TbLogger('service')
             log.exception(e)
         self.activated = True
-        if not self._send_logs_thread.is_alive():
-            self._send_logs_thread.start()
+        self._send_logs_thread = threading.Thread(target=self._send_logs, name='Logs Sending Thread', daemon=True)
+        self._send_logs_thread.start()
 
     def handle(self, record):
         if self.activated and not self.__gateway.stopped:
@@ -121,6 +124,11 @@ class TBLoggerHandler(logging.Handler):
 
     def deactivate(self):
         self.activated = False
+        try:
+            self._send_logs_thread.join()
+        except Exception as e:
+            log = TbLogger('service')
+            log.debug("Exception while joining logs sending thread.", exc_info=e)
 
     @staticmethod
     def set_default_handler():
@@ -140,9 +148,13 @@ class TBLoggerHandler(logging.Handler):
 class TimedRotatingFileHandler(logging.handlers.TimedRotatingFileHandler):
     def __init__(self, filename, when='h', interval=1, backupCount=0,
                  encoding=None, delay=False, utc=False):
-        config_path = environ.get('logs')
+        config_path = environ.get('TB_GW_LOGS_PATH')
         if config_path:
-            filename = config_path + '/' + filename.split('/')[-1]
+            filename = config_path + os.pathsep + filename.split(os.pathsep)[-1]
+
+        if not Path(filename).exists():
+            with open(filename, 'w'):
+                pass
 
         super().__init__(filename, when=when, interval=interval, backupCount=backupCount,
                          encoding=encoding, delay=delay, utc=utc)

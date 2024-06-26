@@ -43,8 +43,7 @@ class GrpcMqttConnector(GwGrpcConnector):
         self.__config = self.connection_config['config'][list(self.connection_config['config'].keys())[0]]
         self._connector_key = self.connection_config['grpc_key']
         self._connector_type = 'mqtt'
-        self.setName(
-            self.__config.get("name", 'MQTT Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
+        self.name = self.__config.get("name", 'MQTT Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
 
         self.statistics = {'MessagesReceived': 0, 'MessagesSent': 0}
         self.__subscribes_sent = {}
@@ -158,10 +157,13 @@ class GrpcMqttConnector(GwGrpcConnector):
         self._on_message_thread.start()
 
     def load_handlers(self, handler_flavor, mandatory_keys, accepted_handlers_list):
-        if handler_flavor not in self.__config:
+        config = self.__config.get(handler_flavor, [])
+        if self.__config.get("requestsMapping") is not None:
+            config = self.__config["requestsMapping"].get(handler_flavor, [])
+        if handler_flavor not in config:
             log.error("'%s' section missing from configuration", handler_flavor)
         else:
-            for handler in self.__config.get(handler_flavor):
+            for handler in config:
                 discard = False
 
                 for key in mandatory_keys:

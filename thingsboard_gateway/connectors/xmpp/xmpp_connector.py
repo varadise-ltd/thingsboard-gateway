@@ -56,8 +56,9 @@ class XMPPConnector(Connector, Thread):
         self.__id = self.__config.get('id')
         self._server_config = config['server']
         self._devices_config = config.get('devices', [])
-        self.setName(config.get("name", 'XMPP Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
-        self.__log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'))
+        self.name = config.get("name", 'XMPP Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
+        self.__log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'),
+                                 enable_remote_logging=self.__config.get('enableRemoteLogging', False))
 
         self._devices = {}
         self._reformat_devices_config()
@@ -202,7 +203,7 @@ class XMPPConnector(Connector, Thread):
         self.__stopped = True
         self._connected = False
         self.__log.info('%s has been stopped.', self.get_name())
-        self.__log.reset()
+        self.__log.stop()
 
     def get_id(self):
         return self.__id

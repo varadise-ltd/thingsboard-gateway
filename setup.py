@@ -17,15 +17,14 @@
 from setuptools import setup
 from os import path
 
+from thingsboard_gateway import version
 
 current_directory = path.abspath(path.dirname(__file__))
 with open(path.join(current_directory, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
-VERSION = "3.4.4"
-
 setup(
-    version=VERSION,
+    version=version.VERSION,
     name="thingsboard-gateway",
     author="ThingsBoard",
     author_email="info@thingsboard.io",
@@ -40,21 +39,21 @@ setup(
               'thingsboard_gateway.storage', 'thingsboard_gateway.storage.memory', 'thingsboard_gateway.gateway.shell',
               'thingsboard_gateway.storage.file', 'thingsboard_gateway.storage.sqlite',
               'thingsboard_gateway.connectors', 'thingsboard_gateway.connectors.ble', 'thingsboard_gateway.connectors.socket',
-              'thingsboard_gateway.connectors.mqtt',  'thingsboard_gateway.connectors.opcua_asyncio', 'thingsboard_gateway.connectors.xmpp',
+              'thingsboard_gateway.connectors.mqtt', 'thingsboard_gateway.connectors.xmpp',
               'thingsboard_gateway.connectors.opcua', 'thingsboard_gateway.connectors.request', 'thingsboard_gateway.connectors.ocpp',
               'thingsboard_gateway.connectors.modbus', 'thingsboard_gateway.connectors.can', 'thingsboard_gateway.connectors.bacnet',
               'thingsboard_gateway.connectors.bacnet.bacnet_utilities', 'thingsboard_gateway.connectors.odbc',
               'thingsboard_gateway.connectors.rest', 'thingsboard_gateway.connectors.snmp', 'thingsboard_gateway.connectors.ftp',
               'thingsboard_gateway.tb_utility', 'thingsboard_gateway.extensions',
               'thingsboard_gateway.extensions.mqtt', 'thingsboard_gateway.extensions.modbus', 'thingsboard_gateway.extensions.opcua',
-              'thingsboard_gateway.extensions.opcua_asyncio', 'thingsboard_gateway.extensions.ocpp',
-              'thingsboard_gateway.extensions.ble', 'thingsboard_gateway.extensions.serial', 'thingsboard_gateway.extensions.request',
+              'thingsboard_gateway.extensions.ocpp', 'thingsboard_gateway.extensions.ble',
+              'thingsboard_gateway.extensions.serial', 'thingsboard_gateway.extensions.request',
               'thingsboard_gateway.extensions.can', 'thingsboard_gateway.extensions.bacnet', 'thingsboard_gateway.extensions.odbc',
               'thingsboard_gateway.extensions.rest',  'thingsboard_gateway.extensions.snmp', 'thingsboard_gateway.extensions.ftp',
               'thingsboard_gateway.extensions.socket', 'thingsboard_gateway.extensions.xmpp',
               ],
     install_requires=[
-        'cryptography==3.4.*',
+        'cryptography',
         'jsonpath-rw',
         'regex',
         'pip',
@@ -66,14 +65,14 @@ setup(
         'pyfiglet',
         'termcolor',
         'mmh3',
-        'grpcio==1.58.0',
+        'grpcio',
         'protobuf',
         'cachetools',
-        'tb-mqtt-client>=1.5',
+        'tb-mqtt-client>=1.9.9',
         'packaging==23.1',
         'service-identity'
     ],
-    download_url='https://github.com/thingsboard/thingsboard-gateway/archive/%s.tar.gz' % VERSION,
+    download_url='https://github.com/thingsboard/thingsboard-gateway/archive/%s.tar.gz' % version.VERSION,
     entry_points={
         'console_scripts': [
             'thingsboard-gateway = thingsboard_gateway.tb_gateway:daemon',

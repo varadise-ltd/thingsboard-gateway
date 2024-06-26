@@ -65,8 +65,9 @@ class OcppConnector(Connector, Thread):
         self.statistics = {'MessagesReceived': 0,
                            'MessagesSent': 0}
         self._gateway = gateway
-        self.setName(self._config.get("name", 'OCPP Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
-        self._log = init_logger(self._gateway, self.name, self._config.get('logLevel', 'INFO'))
+        self.name = self._config.get("name", 'OCPP Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
+        self._log = init_logger(self._gateway, self.name, self._config.get('logLevel', 'INFO'),
+                                enable_remote_logging=self._config.get('enableRemoteLogging', False))
 
         self._default_converters = {'uplink': 'OcppUplinkConverter'}
         self._server = None
@@ -219,7 +220,7 @@ class OcppConnector(Connector, Thread):
         self.__loop.stop()
 
         self._log.info('%s has been stopped.', self.get_name())
-        self._log.reset()
+        self._log.stop()
 
     def get_id(self):
         return self.__id

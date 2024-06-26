@@ -40,10 +40,11 @@ class CustomSerialConnector(Thread, Connector):  # Define a connector class, it 
         self._connector_type = connector_type
         self.__config = config  # Save configuration from the configuration file.
         self.__gateway = gateway  # Save gateway object, we will use some gateway methods for adding devices and saving data from them.
-        self.setName(self.__config.get("name",
+        self.name = self.__config.get("name",
                                        "Custom %s connector " % self.get_name() + ''.join(
-                                           choice(ascii_lowercase) for _ in range(5))))  # get from the configuration or create name for logs.
-        self._log = init_logger(self.__gateway, self.name, level=self.__config.get('logLevel'))
+                                           choice(ascii_lowercase) for _ in range(5)))  # get from the configuration or create name for logs.
+        self._log = init_logger(self.__gateway, self.name, level=self.__config.get('logLevel'),
+                                enable_remote_logging=self.__config.get('enableRemoteLogging', False))
         self._log.info("Starting Custom %s connector", self.get_name())  # Send message to logger
         self.daemon = True  # Set self thread as daemon
         self.stopped = True  # Service variable for check state
@@ -158,7 +159,7 @@ class CustomSerialConnector(Thread, Connector):  # Define a connector class, it 
             self.__gateway.del_device(self.__devices[device]["device_config"]["name"])
             if self.__devices[device]['serial'].isOpen():
                 self.__devices[device]['serial'].close()
-        self._log.reset()
+        self._log.stop()
 
     def on_attributes_update(self, content):  # Function used for processing attribute update requests from ThingsBoard
         self._log.debug(content)

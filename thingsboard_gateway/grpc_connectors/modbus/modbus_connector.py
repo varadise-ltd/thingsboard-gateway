@@ -45,7 +45,7 @@ except ImportError:
 
 if installation_required:
     print("Modbus library not found - installing...")
-    TBUtility.install_package("pymodbus", ">=3.0.0")
+    TBUtility.install_package("pymodbus", "3.0.0")
     TBUtility.install_package('pyserial')
     TBUtility.install_package('pyserial-asyncio')
 
@@ -77,8 +77,7 @@ class GrpcModbusConnector(GwGrpcConnector):
         self.__config = self.connection_config['config'][list(self.connection_config['config'].keys())[0]]
         self._connector_type = 'modbus'
         self._connector_key = self.connection_config['grpc_key']
-        self.setName(
-            self.__config.get("name", 'Modbus Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
+        self.name = self.__config.get("name", 'Modbus Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
 
         self.statistics = {STATISTIC_MESSAGE_RECEIVED_PARAMETER: 0,
                            STATISTIC_MESSAGE_SENT_PARAMETER: 0}

@@ -23,6 +23,7 @@ from time import sleep, time
 
 import simplejson
 
+from thingsboard_gateway.connectors.mqtt.backward_compatibility_adapter import BackwardCompatibilityAdapter
 from thingsboard_gateway.gateway.constants import SEND_ON_CHANGE_PARAMETER, DEFAULT_SEND_ON_CHANGE_VALUE, \
     ATTRIBUTES_PARAMETER, TELEMETRY_PARAMETER, SEND_ON_CHANGE_TTL_PARAMETER, DEFAULT_SEND_ON_CHANGE_INFINITE_TTL_VALUE
 from thingsboard_gateway.gateway.constant_enums import Status
@@ -108,12 +109,24 @@ class MqttConnector(Connector, Thread):
 
         self.__gateway = gateway  # Reference to TB Gateway
         self._connector_type = connector_type  # Should be "mqtt"
-        self.config = config  # mqtt.json contents
+
+        # check if the configuration is in the old format
+        self._using_old_config_format = False
+        if BackwardCompatibilityAdapter.is_old_config_format(config):
+            self._using_old_config_format = True
+            self.config = BackwardCompatibilityAdapter(config).convert()
+        else:
+            self.config = config
+
         self.__id = self.config.get('id')
 
-        self.__log = init_logger(self.__gateway, self.config['name'], self.config.get('logLevel', 'INFO'))
+        self.__log = init_logger(self.__gateway, self.config['name'], self.config.get('logLevel', 'INFO'),
+                                 enable_remote_logging=self.config.get('enableRemoteLogging', False))
         self.statistics = {'MessagesReceived': 0, 'MessagesSent': 0}
         self.__subscribes_sent = {}
+
+        if self._using_old_config_format:
+            self.__log.warning("Old MQTT connector configuration format detected. Automatic conversion is applied.")
 
         # Extract main sections from configuration ---------------------------------------------------------------------
         self.__broker = config.get('broker')
@@ -134,7 +147,7 @@ class MqttConnector(Connector, Thread):
         self.__shared_custom_converters = {}
 
         mandatory_keys = {
-            "mapping": ['topicFilter', 'converter'],
+            "dataMapping": ['topicFilter', 'converter'],
             "serverSideRpc": ['deviceNameFilter', 'methodFilter', 'requestTopicExpression', 'valueExpression'],
             "connectRequests": ['topicFilter'],
             "disconnectRequests": ['topicFilter'],
@@ -143,7 +156,7 @@ class MqttConnector(Connector, Thread):
         }
 
         # Mappings, i.e., telemetry/attributes-push handlers provided by user via configuration file
-        self.load_handlers('mapping', mandatory_keys['mapping'], self.__mapping)
+        self.load_handlers('dataMapping', mandatory_keys['dataMapping'], self.__mapping)
 
         # RPCs, i.e., remote procedure calls (ThingsBoard towards devices) handlers
         self.load_handlers('serverSideRpc', mandatory_keys['serverSideRpc'], self.__server_side_rpc)
@@ -244,10 +257,12 @@ class MqttConnector(Connector, Thread):
         return self.__send_data_only_on_change_ttl
 
     def load_handlers(self, handler_flavor, mandatory_keys, accepted_handlers_list):
-        if handler_flavor not in self.config:
+        config = self.config.get(handler_flavor) or self.config.get("requestsMapping", {}).get(handler_flavor)
+
+        if config is None:
             self.__log.warning("'%s' section missing from configuration", handler_flavor)
         else:
-            for handler in self.config.get(handler_flavor):
+            for handler in config:
                 discard = False
 
                 for key in mandatory_keys:
@@ -262,7 +277,7 @@ class MqttConnector(Connector, Thread):
 
                 if discard:
                     self.__log.warning("%s handler is missing some mandatory keys => rejected: %s",
-                                     handler_flavor, simplejson.dumps(handler))
+                                       handler_flavor, simplejson.dumps(handler))
                 else:
                     accepted_handlers_list.append(handler)
                     self.__log.debug("%s handler has all mandatory keys => accepted: %s",
@@ -273,8 +288,8 @@ class MqttConnector(Connector, Thread):
                             len(accepted_handlers_list))
 
             self.__log.debug("Number of rejected %s handlers: %d",
-                            handler_flavor,
-                            len(self.config.get(handler_flavor)) - len(accepted_handlers_list))
+                             handler_flavor,
+                             len(config) - len(accepted_handlers_list))
 
     def is_connected(self):
         return self._connected
@@ -312,7 +327,7 @@ class MqttConnector(Connector, Thread):
                 self._client.loop_start()
                 if not self._connected:
                     sleep(1)
-            except (ConnectionRefusedError, ConnectionResetError, socket.timeout) as e:
+            except (ConnectionRefusedError, ConnectionResetError, ssl.SSLEOFError, socket.timeout) as e:
                 self.__log.error(e)
                 sleep(10)
 
@@ -323,8 +338,10 @@ class MqttConnector(Connector, Thread):
         except Exception as e:
             self.__log.exception(e)
         self._client.loop_stop()
+        for worker in self.__workers_thread_pool:
+            worker.stop()
         self.__log.info('%s has been stopped.', self.get_name())
-        self.__log.reset()
+        self.__log.stop()
 
     def get_name(self):
         return self.name
@@ -495,7 +512,7 @@ class MqttConnector(Connector, Thread):
 
     def __threads_manager(self):
         if len(self.__workers_thread_pool) == 0:
-            worker = MqttConnector.ConverterWorker("Main", self.__msg_queue, self._save_converted_msg)
+            worker = MqttConnector.ConverterWorker("Main Worker", self.__msg_queue, self._save_converted_msg)
             self.__workers_thread_pool.append(worker)
             worker.start()
 
@@ -515,6 +532,33 @@ class MqttConnector(Connector, Thread):
 
     def _on_message(self, client, userdata, message):
         self._on_message_queue.put((client, userdata, message))
+
+    @staticmethod
+    def _parse_device_info(device_info, topic, content):
+        found_device_name = None
+        found_device_type = 'default'
+
+        # Get device name, either from topic or from content
+        if device_info.get('deviceNameExpressionSource') == 'topic':
+            device_name_match = search(device_info["deviceNameExpression"], topic)
+            if device_name_match is not None:
+                found_device_name = device_name_match.group(0)
+        elif device_info.get('deviceNameExpressionSource') == 'message' or device_info.get(
+                'deviceNameExpression') == 'constant':
+            found_device_name = TBUtility.get_value(device_info["deviceNameExpression"], content,
+                                                    expression_instead_none=True)
+
+        # Get device type (if any), either from topic or from content
+        if device_info.get("deviceProfileExpressionSource") == 'topic':
+            device_type_match = search(device_info["deviceProfileExpression"], topic)
+            found_device_type = device_type_match.group(0) if device_type_match is not None else device_info[
+                "deviceProfileExpression"]
+        elif device_info.get("deviceProfileExpressionSource") == 'message' or device_info.get(
+                'deviceNameExpression') == 'constant':
+            found_device_type = TBUtility.get_value(device_info["deviceProfileExpression"], content,
+                                                    expression_instead_none=True)
+
+        return found_device_name, found_device_type
 
     def _process_on_message(self):
         while not self.__stopped:
@@ -569,25 +613,11 @@ class MqttConnector(Connector, Thread):
                     for topic in topic_handlers:
                         handler = self.__connect_requests_sub_topics[topic]
 
-                        found_device_name = None
-                        found_device_type = 'default'
-
                         # Get device name, either from topic or from content
-                        if handler.get("deviceNameTopicExpression"):
-                            device_name_match = search(handler["deviceNameTopicExpression"], message.topic)
-                            if device_name_match is not None:
-                                found_device_name = device_name_match.group(0)
-                        elif handler.get("deviceNameJsonExpression"):
-                            found_device_name = TBUtility.get_value(handler["deviceNameJsonExpression"], content)
+                        device_info = handler.get("deviceInfo", {})
 
-                        # Get device type (if any), either from topic or from content
-                        if handler.get("deviceTypeTopicExpression"):
-                            device_type_match = search(handler["deviceTypeTopicExpression"], message.topic)
-                            found_device_type = device_type_match.group(0) if device_type_match is not None else \
-                            handler[
-                                "deviceTypeTopicExpression"]
-                        elif handler.get("deviceTypeJsonExpression"):
-                            found_device_type = TBUtility.get_value(handler["deviceTypeJsonExpression"], content)
+                        found_device_name, found_device_type = MqttConnector._parse_device_info(device_info,
+                                                                                                message.topic, content)
 
                         if found_device_name is None:
                             self.__log.error("Device name missing from connection request")
@@ -609,24 +639,10 @@ class MqttConnector(Connector, Thread):
                     for topic in topic_handlers:
                         handler = self.__disconnect_requests_sub_topics[topic]
 
-                        found_device_name = None
-                        found_device_type = 'default'
-
                         # Get device name, either from topic or from content
-                        if handler.get("deviceNameTopicExpression"):
-                            device_name_match = search(handler["deviceNameTopicExpression"], message.topic)
-                            if device_name_match is not None:
-                                found_device_name = device_name_match.group(0)
-                        elif handler.get("deviceNameJsonExpression"):
-                            found_device_name = TBUtility.get_value(handler["deviceNameJsonExpression"], content)
-
-                        # Get device type (if any), either from topic or from content
-                        if handler.get("deviceTypeTopicExpression"):
-                            device_type_match = search(handler["deviceTypeTopicExpression"], message.topic)
-                            if device_type_match is not None:
-                                found_device_type = device_type_match.group(0)
-                        elif handler.get("deviceTypeJsonExpression"):
-                            found_device_type = TBUtility.get_value(handler["deviceTypeJsonExpression"], content)
+                        device_info = handler.get("deviceInfo", {})
+                        found_device_name, found_device_type = MqttConnector._parse_device_info(device_info,
+                                                                                                message.topic, content)
 
                         if found_device_name is None:
                             self.__log.error("Device name missing from disconnection request")
@@ -652,26 +668,22 @@ class MqttConnector(Connector, Thread):
                         for topic in topic_handlers:
                             handler = self.__attribute_requests_sub_topics[topic]
 
-                            found_device_name = None
                             found_attribute_names = None
 
                             # Get device name, either from topic or from content
-                            if handler.get("deviceNameTopicExpression"):
-                                device_name_match = search(handler["deviceNameTopicExpression"], message.topic)
-                                if device_name_match is not None:
-                                    found_device_name = device_name_match.group(0)
-                            elif handler.get("deviceNameJsonExpression"):
-                                found_device_name = TBUtility.get_value(handler["deviceNameJsonExpression"], content)
+                            device_info = handler.get("deviceInfo", {})
+                            found_device_name, _ = MqttConnector._parse_device_info(device_info, message.topic, content)
 
                             # Get attribute name, either from topic or from content
-                            if handler.get("attributeNameTopicExpression"):
-                                attribute_name_match = search(handler["attributeNameTopicExpression"], message.topic)
+                            if handler.get("attributeNameExpressionSource") == "topic":
+                                attribute_name_match = search(handler["attributeNameExpression"], message.topic)
                                 if attribute_name_match is not None:
                                     found_attribute_names = attribute_name_match.group(0)
-                            elif handler.get("attributeNameJsonExpression"):
+                            elif handler.get("attributeNameExpressionSource") == "message" or handler.get(
+                                    "attributeNameExpressionSource") == "constant":
                                 found_attribute_names = list(filter(lambda x: x is not None,
                                                                     TBUtility.get_values(
-                                                                        handler["attributeNameJsonExpression"],
+                                                                        handler["attributeNameExpression"],
                                                                         content)))
 
                             if found_device_name is None:
@@ -684,16 +696,26 @@ class MqttConnector(Connector, Thread):
 
                             self.__log.info("Will retrieve attribute %s of %s", found_attribute_names,
                                             found_device_name)
-                            self.__gateway.tb_client.client.gw_request_shared_attributes(
-                                found_device_name,
-                                found_attribute_names,
-                                lambda data, *args: self.notify_attribute(
-                                    data,
-                                    found_attribute_names,
-                                    handler.get("topicExpression"),
-                                    handler.get("valueExpression"),
-                                    handler.get('retain', False)))
+                            scope = 'shared'
+                            if handler.get('scope') is not None:
+                                scope = handler.get('scope')
+                            if content and TBUtility.get_value(f'${scope}', content, get_tag=True) is not None:
+                                scope = TBUtility.get_value(f'${scope}', content, get_tag=True)
 
+                            request_arguments = (
+                                    found_device_name,
+                                    found_attribute_names,
+                                    lambda data, *args: self.notify_attribute(
+                                        data,
+                                        found_attribute_names,
+                                        handler.get("topicExpression"),
+                                        handler.get("valueExpression"),
+                                        handler.get('retain', False)))
+
+                            if scope == 'client':
+                                self.__gateway.tb_client.client.gw_request_client_attributes(*request_arguments)
+                            else:
+                                self.__gateway.tb_client.client.gw_request_shared_attributes(*request_arguments)
                             break
 
                     except Exception as e:
@@ -722,7 +744,7 @@ class MqttConnector(Connector, Thread):
             return
 
         device_name = incoming_data.get("device")
-        attribute_values = incoming_data.get('value') or incoming_data.get('values')
+        attribute_values = incoming_data.get("value", incoming_data.get("values"))
 
         topic = topic_expression \
             .replace("${deviceName}", str(device_name)) \
@@ -793,9 +815,8 @@ class MqttConnector(Connector, Thread):
                 .replace("${methodName}", str(content['data']['method'])) \
                 .replace("${requestId}", str(content["data"]["id"]))
 
-            ##bugfix:should assign the replace result to expected_response_topic
             if content.get('device'):
-                expected_response_topic= expected_response_topic.replace("${deviceName}", str(content["device"]))
+                expected_response_topic = expected_response_topic.replace("${deviceName}", str(content["device"]))
 
             expected_response_topic = TBUtility.replace_params_tags(expected_response_topic, content)
 
@@ -832,8 +853,6 @@ class MqttConnector(Connector, Thread):
             .replace("${methodName}", str(content['data']['method'])) \
             .replace("${requestId}", str(content["data"]["id"]))
 
-        #bugfix:deviceName is not in content['data'] but in content, and should assign the replace result to request_topic
-        #if content['data'].get('device'):
         if content['device']:
             request_topic = request_topic.replace("${deviceName}", str(content["device"]))
 
@@ -858,8 +877,9 @@ class MqttConnector(Connector, Thread):
                 self.__log.exception("Error during publishing to target broker: %r", e)
                 self.__gateway.send_rpc_reply(device=content["device"],
                                               req_id=content["data"]["id"],
-                                              content={"error": str.format("Error during publishing to target broker: %r", str(e))},
+                                              content={"error": str.format("Error during publishing to target broker: %r",str(e))},
                                               success_sent=False)
+                return
             if not expects_response or not defines_timeout:
                 self.__log.info("One-way RPC: sending ack to ThingsBoard immediately")
                 self.__gateway.send_rpc_reply(device=content["device"], req_id=content["data"]["id"],
@@ -932,15 +952,16 @@ class MqttConnector(Connector, Thread):
                 converter_obj.config = config
                 self._send_current_converter_config(self.name + ':' + converter_name, config)
                 self.__log.info('Updated converter configuration for: %s with configuration %s',
-                         converter_name, converter_obj.config)
+                                converter_name, converter_obj.config)
 
-                for device_config in self.config['mapping']:
+                for device_config in self.config['dataMapping']:
                     try:
-                        if device_config['converter']['deviceNameJsonExpression'] == config['deviceNameJsonExpression']:
+                        if device_config['converter']['deviceInfo']['deviceNameExpression'] == config[
+                                'deviceNameExpression']:
                             device_config['converter'].update(config)
 
-                        if device_config['converter']['deviceNameTopicExpression'] == config[
-                                'deviceNameTopicExpression']:
+                        if device_config['converter']['deviceInfo']['deviceProfileExpression'] == config[
+                                'deviceProfileExpression']:
                             device_config['converter'].update(config)
                     except KeyError:
                         continue
@@ -962,8 +983,8 @@ class MqttConnector(Connector, Thread):
         def __init__(self, name, incoming_queue, send_result):
             super().__init__()
             self.stopped = False
-            self.setName(name)
-            self.setDaemon(True)
+            self.name = name
+            self.daemon = True
             self.__msg_queue = incoming_queue
             self.in_progress = False
             self.__send_result = send_result
@@ -974,10 +995,12 @@ class MqttConnector(Connector, Thread):
                     self.in_progress = True
                     convert_function, config, incoming_data = self.__msg_queue.get(True, 100)
                     converted_data = convert_function(config, incoming_data)
-                    # log.debug(converted_data)
                     if converted_data and (converted_data.get(ATTRIBUTES_PARAMETER) or
                                            converted_data.get(TELEMETRY_PARAMETER)):
                         self.__send_result(config, converted_data)
                     self.in_progress = False
                 else:
                     sleep(.2)
+
+        def stop(self):
+            self.stopped = True

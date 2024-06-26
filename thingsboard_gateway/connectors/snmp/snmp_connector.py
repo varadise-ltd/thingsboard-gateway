@@ -54,8 +54,9 @@ class SNMPConnector(Connector, Thread):
         self._connector_type = connector_type
         self.__config = config
         self.__id = self.__config.get('id')
-        self.setName(config.get("name", 'SNMP Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
-        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'))
+        self.name = config.get("name", 'SNMP Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
+        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'),
+                                enable_remote_logging=self.__config.get('enableRemoteLogging', False))
         self.__devices = self.__config["devices"]
         self.statistics = {'MessagesReceived': 0,
                            'MessagesSent': 0}
@@ -125,11 +126,10 @@ class SNMPConnector(Connector, Thread):
 
     async def __process_data(self, device):
         common_parameters = self.__get_common_parameters(device)
-        converted_data = {}
+        device_responses = {}
         for datatype in self.__datatypes:
             for datatype_config in device[datatype]:
                 try:
-                    response = None
                     method = datatype_config.get("method")
                     if method is None:
                         self._log.error("Method not found in configuration: %r", datatype_config)
@@ -139,16 +139,20 @@ class SNMPConnector(Connector, Thread):
                     if method not in self.__methods:
                         self._log.error("Unknown method: %s, configuration is: %r", method, datatype_config)
                     response = await self.__process_methods(method, common_parameters, datatype_config)
-                    converted_data.update(**device["uplink_converter"].convert((datatype, datatype_config), response))
+                    device_responses[datatype_config['key']] = response
                 except SNMPTimeoutException:
-                    self._log.error("Timeout exception on connection to device \"%s\" with ip: \"%s\"", device["deviceName"],
-                              device["ip"])
+                    self._log.error("Timeout exception on connection to device \"%s\" with ip: \"%s\"",
+                                    device["deviceName"],
+                                    device["ip"])
                     return
                 except Exception as e:
                     self._log.exception(e)
 
-        if isinstance(converted_data, dict) and (converted_data.get("attributes") or converted_data.get("telemetry")):
-            self.collect_statistic_and_send(self.get_name(), self.get_id(), converted_data)
+        if device_responses:
+            converted_data = device["uplink_converter"].convert(device, device_responses)
+
+            if isinstance(converted_data, dict) and (converted_data.get("attributes") or converted_data.get("telemetry")):
+                self.collect_statistic_and_send(self.get_name(), self.get_id(), converted_data)
 
     async def __process_methods(self, method, common_parameters, datatype_config):
         client = Client(ip=common_parameters['ip'],

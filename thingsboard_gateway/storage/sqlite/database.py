@@ -11,8 +11,8 @@
 #     WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #     See the License for the specific language governing permissions and
 #     limitations under the License.
-
-from os.path import exists
+from os.path import exists, dirname
+from os import makedirs
 from time import time, sleep
 from logging import getLogger
 from threading import Thread
@@ -38,12 +38,20 @@ class Database(Thread):
 
     def __init__(self, config, processing_queue: Queue):
         super().__init__()
-        self.setDaemon(True)
+        self.daemon = True
         self.settings = StorageSettings(config)
 
         if not exists(self.settings.data_folder_path):
+            directory = dirname(self.settings.data_folder_path)
+            if not exists(directory):
+                log.info("SQLite database file not found, creating new one...")
+                try:
+                    makedirs(directory)
+                    log.info("Directory %s created" % directory)
+                except Exception as e:
+                    log.exception("Failed to create directory %s" % directory, exc_info=e)
             with open(self.settings.data_folder_path, 'w'):
-                pass
+                log.info("SQLite database file created at %s" % self.settings.data_folder_path)
 
         # Pass settings to connector
         self.db = DatabaseConnector(self.settings)

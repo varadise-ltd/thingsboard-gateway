@@ -68,12 +68,13 @@ class CanConnector(Connector, Thread):
         self.statistics = {'MessagesReceived': 0,
                            'MessagesSent': 0}
         super().__init__()
-        self.setName(config.get("name", 'CAN Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
+        self.name = config.get("name", 'CAN Connector ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
         self.__gateway = gateway
         self._connector_type = connector_type
         self.__config = config
         self.__id = self.__config.get('id')
-        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'))
+        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'),
+                                enable_remote_logging=self.__config.get('enableRemoteLogging', False))
         self.__bus_conf = {}
         self.__bus = None
         self.__reconnect_count = 0
@@ -100,7 +101,7 @@ class CanConnector(Connector, Thread):
         if not self.__stopped:
             self.__stopped = True
             self._log.debug("[%s] Stopping", self.get_name())
-            self._log.reset()
+            self._log.stop()
 
     def get_name(self):
         return self.name

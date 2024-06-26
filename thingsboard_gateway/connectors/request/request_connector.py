@@ -52,8 +52,9 @@ class RequestConnector(Connector, Thread):
         self.__id = self.__config.get('id')
         self._connector_type = connector_type
         self.__gateway = gateway
-        self.setName(self.__config.get("name", "".join(choice(ascii_lowercase) for _ in range(5))))
-        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'))
+        self.name = self.__config.get("name", "".join(choice(ascii_lowercase) for _ in range(5)))
+        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'),
+                                enable_remote_logging=self.__config.get('enableRemoteLogging', False))
         self.__security = HTTPBasicAuth(self.__config["security"]["username"], self.__config["security"]["password"]) if \
             self.__config["security"]["type"] == "basic" else None
         self.__host = None
@@ -321,7 +322,7 @@ class RequestConnector(Connector, Thread):
 
     def close(self):
         self.__stopped = True
-        self._log.reset()
+        self._log.stop()
 
     def get_config(self):
         return self.__config

@@ -44,12 +44,13 @@ class BACnetConnector(Thread, Connector):
         super().__init__()
         self.__config = config
         self.__id = self.__config.get('id')
-        self.setName(config.get('name', 'BACnet ' + ''.join(choice(ascii_lowercase) for _ in range(5))))
+        self.name = config.get('name', 'BACnet ' + ''.join(choice(ascii_lowercase) for _ in range(5)))
         self.__devices = []
         self.__device_indexes = {}
         self.__devices_address_name = {}
         self.__gateway = gateway
-        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'))
+        self._log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'),
+                                enable_remote_logging=self.__config.get('enableRemoteLogging', False))
         self._application = TBBACnetApplication(self, self.__config, self._log)
         self.__bacnet_core_thread = Thread(target=run, name="BACnet core thread", daemon=True,
                                            kwargs={"sigterm": None, "sigusr1": None})
@@ -110,7 +111,7 @@ class BACnetConnector(Thread, Connector):
     def close(self):
         self.__stopped = True
         self.__connected = False
-        self._log.reset()
+        self._log.stop()
 
         self._application.mux.directPort.connected = False
         self._application.mux.directPort.accepting = False

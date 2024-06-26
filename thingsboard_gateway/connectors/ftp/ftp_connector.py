@@ -45,8 +45,9 @@ class FTPConnector(Connector, Thread):
         self.security = {**self.__config['security']} if self.__config['security']['type'] == 'basic' else {
             'username': 'anonymous', "password": 'anonymous@'}
         self.__tls_support = self.__config.get("TLSSupport", False)
-        self.setName(self.__config.get("name", "".join(choice(ascii_lowercase) for _ in range(5))))
-        self.__log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'))
+        self.name = self.__config.get("name", "".join(choice(ascii_lowercase) for _ in range(5)))
+        self.__log = init_logger(self.__gateway, self.name, self.__config.get('logLevel', 'INFO'),
+                                 enable_remote_logging=self.__config.get('enableRemoteLogging', False))
         self.daemon = True
         self.__stopped = False
         self.__requests_in_progress = []
@@ -188,7 +189,7 @@ class FTPConnector(Connector, Thread):
     def close(self):
         self.__stopped = True
         self.__log.info('FTP Connector stopped.')
-        self.__log.reset()
+        self.__log.stop()
 
     def get_name(self):
         return self.name
