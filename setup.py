@@ -59,7 +59,7 @@ setup(
         'pip',
         'PyYAML',
         'simplejson',
-        'urllib3<=1.26.15',
+        'urllib3<=2.2.2',
         'requests>=2.31.0',
         'questionary',
         'pyfiglet',
